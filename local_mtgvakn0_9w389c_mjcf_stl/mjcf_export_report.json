@@ -1,0 +1,16 @@
+{
+  "status": "ok",
+  "coordinate_schema_version": 3,
+  "coordinate_frame": "z_up_x_forward",
+  "rotation_convention": "Rz(yaw) * Ry(pitch) * Rx(roll)",
+  "rpy_unit": "radian",
+  "warnings": [
+    "MJCF export creates joints but not actuators; add motors/controllers in MuJoCo for simulation control."
+  ],
+  "errors": [],
+  "mjcf_file": "robot.xml",
+  "mesh_mode": "per_part",
+  "mesh_files": [],
+  "logical_mesh_count": 0,
+  "mesh_chunks_split": false
+}

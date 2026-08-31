@@ -1,0 +1,906 @@
+{
+  "robot_name": "generated_robot",
+  "coordinate_schema_version": 3,
+  "coordinate_frame": "z_up_x_forward",
+  "links": [
+    {
+      "link_id": "link_001",
+      "name": "chassis",
+      "part_ids": [
+        "part_001"
+      ],
+      "mass": 14.996783241131094,
+      "inertia": {
+        "ixx": 0.2078822901045274,
+        "iyy": 0.20788229027296157,
+        "izz": 0.3997680115869492,
+        "ixy": 0,
+        "ixz": 0,
+        "iyz": 0
+      },
+      "visual_meshes": [],
+      "collision_meshes": [],
+      "sites": [],
+      "mass_properties": {
+        "source": "geometry",
+        "mass": 14.996783241131094,
+        "com_xyz_cad": [
+          1.9047850952625096,
+          -9.093719489999991,
+          47.18893432617184
+        ],
+        "inertia_com_cad": {
+          "ixx": 0.2078822901045274,
+          "iyy": 0.20788229027296157,
+          "izz": 0.3997680115869492,
+          "ixy": 0,
+          "ixz": 0,
+          "iyz": 0
+        },
+        "quality": "exact_mesh",
+        "units": "kg_m2",
+        "volume_m3": 0.012497319367609245
+      }
+    },
+    {
+      "link_id": "link_002",
+      "name": "Steering_joint_LF",
+      "part_ids": [
+        "part_002"
+      ],
+      "mass": 0.3415544466298071,
+      "inertia": {
+        "ixx": 0.0002433863222921241,
+        "iyy": 0.00021820912670532516,
+        "izz": 0.0002885163351346296,
+        "ixy": -1.0075138560852488e-8,
+        "ixz": 6.841287373536308e-9,
+        "iyz": 0.000008741704112942115
+      },
+      "visual_meshes": [],
+      "collision_meshes": [],
+      "sites": [],
+      "mass_properties": {
+        "source": "geometry",
+        "mass": 0.3415544466298071,
+        "com_xyz_cad": [
+          151.90691037398506,
+          142.57811594800393,
+          -20.876578310254672
+        ],
+        "inertia_com_cad": {
+          "ixx": 0.0002433863222921241,
+          "iyy": 0.00021820912670532516,
+          "izz": 0.0002885163351346296,
+          "ixy": -1.0075138560852488e-8,
+          "ixz": 6.841287373536308e-9,
+          "iyz": 0.000008741704112942115
+        },
+        "quality": "exact_mesh",
+        "units": "kg_m2",
+        "volume_m3": 0.0002846287055248393
+      }
+    },
+    {
+      "link_id": "link_003",
+      "name": "Posture_control_joint_LF",
+      "part_ids": [
+        "part_003"
+      ],
+      "mass": 0.0353999775246997,
+      "inertia": {
+        "ixx": 0.00000554432546094801,
+        "iyy": 0.00003142071983675919,
+        "izz": 0.00002646639400123432,
+        "ixy": 0,
+        "ixz": -0.000008078826109571258,
+        "iyz": 0
+      },
+      "visual_meshes": [],
+      "collision_meshes": [],
+      "sites": [],
+      "mass_properties": {
+        "source": "geometry",
+        "mass": 0.0353999775246997,
+        "com_xyz_cad": [
+          187.39588595943638,
+          200.96725463109252,
+          -25.701905792005228
+        ],
+        "inertia_com_cad": {
+          "ixx": 0.00000554432546094801,
+          "iyy": 0.00003142071983675919,
+          "izz": 0.00002646639400123432,
+          "ixy": 0,
+          "ixz": -0.000008078826109571258,
+          "iyz": 0
+        },
+        "quality": "exact_mesh",
+        "units": "kg_m2",
+        "volume_m3": 0.000029499981270583083
+      }
+    },
+    {
+      "link_id": "link_004",
+      "name": "Wheel_joint_LF",
+      "part_ids": [
+        "part_004"
+      ],
+      "mass": 0.7515347324586649,
+      "inertia": {
+        "ixx": 0.0018977930864561153,
+        "iyy": 0.0037454837916135564,
+        "izz": 0.0018977930206547841,
+        "ixy": 0,
+        "ixz": -7.032439664985396e-12,
+        "iyz": 0
+      },
+      "visual_meshes": [],
+      "collision_meshes": [],
+      "sites": [],
+      "mass_properties": {
+        "source": "geometry",
+        "mass": 0.7515347324586649,
+        "com_xyz_cad": [
+          222.886986700052,
+          215.9672546310936,
+          -13.59274526429693
+        ],
+        "inertia_com_cad": {
+          "ixx": 0.0018977930864561153,
+          "iyy": 0.0037454837916135564,
+          "izz": 0.0018977930206547841,
+          "ixy": 0,
+          "ixz": -7.032439664985396e-12,
+          "iyz": 0
+        },
+        "quality": "exact_mesh",
+        "units": "kg_m2",
+        "volume_m3": 0.000626278943715554
+      }
+    },
+    {
+      "link_id": "link_005",
+      "name": "Steering_joint_RF",
+      "part_ids": [
+        "part_007"
+      ],
+      "mass": 0.3415544523195712,
+      "inertia": {
+        "ixx": 0.00024338633046519718,
+        "iyy": 0.00021820913224816535,
+        "izz": 0.00028851634584527007,
+        "ixy": -1.0079789570162373e-8,
+        "ixz": -6.839167470059911e-9,
+        "iyz": -0.00000874170324689727
+      },
+      "visual_meshes": [],
+      "collision_meshes": [],
+      "sites": [],
+      "mass_properties": {
+        "source": "geometry",
+        "mass": 0.3415544523195712,
+        "com_xyz_cad": [
+          151.90266061395153,
+          -160.76555344118518,
+          -20.876578180327854
+        ],
+        "inertia_com_cad": {
+          "ixx": 0.00024338633046519718,
+          "iyy": 0.00021820913224816535,
+          "izz": 0.00028851634584527007,
+          "ixy": -1.0079789570162373e-8,
+          "ixz": -6.839167470059911e-9,
+          "iyz": -0.00000874170324689727
+        },
+        "quality": "exact_mesh",
+        "units": "kg_m2",
+        "volume_m3": 0.00028462871026630935
+      }
+    },
+    {
+      "link_id": "link_006",
+      "name": "Posture_control_joint_RF",
+      "part_ids": [
+        "part_010"
+      ],
+      "mass": 0.035399976192588986,
+      "inertia": {
+        "ixx": 0.00002901357778320967,
+        "iyy": 0.00003142071981921117,
+        "izz": 0.000002997141639200937,
+        "ixy": 0,
+        "ixz": 0.0000023424222082162936,
+        "iyz": 0
+      },
+      "visual_meshes": [],
+      "collision_meshes": [],
+      "sites": [],
+      "mass_properties": {
+        "source": "geometry",
+        "mass": 0.035399976192588986,
+        "com_xyz_cad": [
+          148.56864190241475,
+          -219.1546936110947,
+          -0.4597589679751038
+        ],
+        "inertia_com_cad": {
+          "ixx": 0.00002901357778320967,
+          "iyy": 0.00003142071981921117,
+          "izz": 0.000002997141639200937,
+          "ixy": 0,
+          "ixz": 0.0000023424222082162936,
+          "iyz": 0
+        },
+        "quality": "exact_mesh",
+        "units": "kg_m2",
+        "volume_m3": 0.00002949998016049082
+      }
+    },
+    {
+      "link_id": "link_007",
+      "name": "Wheel_joint_RF",
+      "part_ids": [
+        "part_013"
+      ],
+      "mass": 0.7515347494565593,
+      "inertia": {
+        "ixx": 0.001897793140187404,
+        "iyy": 0.00374548396104111,
+        "izz": 0.0018977931374841717,
+        "ixy": 0,
+        "ixz": -1.077668148397428e-11,
+        "iyz": 0
+      },
+      "visual_meshes": [],
+      "collision_meshes": [],
+      "sites": [],
+      "mass_properties": {
+        "source": "geometry",
+        "mass": 0.7515347494565593,
+        "com_xyz_cad": [
+          145.23250227047964,
+          -234.15469361109365,
+          36.89154925182824
+        ],
+        "inertia_com_cad": {
+          "ixx": 0.001897793140187404,
+          "iyy": 0.00374548396104111,
+          "izz": 0.0018977931374841717,
+          "ixy": 0,
+          "ixz": -1.077668148397428e-11,
+          "iyz": 0
+        },
+        "quality": "exact_mesh",
+        "units": "kg_m2",
+        "volume_m3": 0.0006262789578804661
+      }
+    },
+    {
+      "link_id": "link_008",
+      "name": "Steering_joint_LB",
+      "part_ids": [
+        "part_005"
+      ],
+      "mass": 0.34155445556926395,
+      "inertia": {
+        "ixx": 0.00024338633312643405,
+        "iyy": 0.0002182091361277367,
+        "izz": 0.0002885163507476258,
+        "ixy": -1.008212278580266e-8,
+        "ixz": 6.8391409028824245e-9,
+        "iyz": 0.000008741703178584982
+      },
+      "visual_meshes": [],
+      "collision_meshes": [],
+      "sites": [],
+      "mass_properties": {
+        "source": "geometry",
+        "mass": 0.34155445556926395,
+        "com_xyz_cad": [
+          -148.093090025415,
+          142.57811468625206,
+          -20.87657817545013
+        ],
+        "inertia_com_cad": {
+          "ixx": 0.00024338633312643405,
+          "iyy": 0.0002182091361277367,
+          "izz": 0.0002885163507476258,
+          "ixy": -1.008212278580266e-8,
+          "ixz": 6.8391409028824245e-9,
+          "iyz": 0.000008741703178584982
+        },
+        "quality": "exact_mesh",
+        "units": "kg_m2",
+        "volume_m3": 0.0002846287129743866
+      }
+    },
+    {
+      "link_id": "link_009",
+      "name": "Posture_control_joint_LB",
+      "part_ids": [
+        "part_008"
+      ],
+      "mass": 0.035399980301432016,
+      "inertia": {
+        "ixx": 0.0000028272709705290872,
+        "iyy": 0.00003142072435603447,
+        "izz": 0.000029183453057178662,
+        "ixy": 0,
+        "ixz": -0.0000010191344222984189,
+        "iyz": 0
+      },
+      "visual_meshes": [],
+      "collision_meshes": [],
+      "sites": [],
+      "mass_properties": {
+        "source": "geometry",
+        "mass": 0.035399980301432016,
+        "com_xyz_cad": [
+          -185.5672933746494,
+          200.967254631094,
+          -39.25786650527873
+        ],
+        "inertia_com_cad": {
+          "ixx": 0.0000028272709705290872,
+          "iyy": 0.00003142072435603447,
+          "izz": 0.000029183453057178662,
+          "ixy": 0,
+          "ixz": -0.0000010191344222984189,
+          "iyz": 0
+        },
+        "quality": "exact_mesh",
+        "units": "kg_m2",
+        "volume_m3": 0.00002949998358452668
+      }
+    },
+    {
+      "link_id": "link_010",
+      "name": "Wheel_joint_LB",
+      "part_ids": [
+        "part_011"
+      ],
+      "mass": 0.7515347371768442,
+      "inertia": {
+        "ixx": 0.0018977930812571135,
+        "iyy": 0.0037454838386422507,
+        "izz": 0.0018977930731970984,
+        "ixy": 0,
+        "ixz": 4.7824263732304264e-11,
+        "iyz": 0
+      },
+      "visual_meshes": [],
+      "collision_meshes": [],
+      "sites": [],
+      "mass_properties": {
+        "source": "geometry",
+        "mass": 0.7515347371768442,
+        "com_xyz_cad": [
+          -223.03937448369223,
+          215.96725463109368,
+          -40.70466745113876
+        ],
+        "inertia_com_cad": {
+          "ixx": 0.0018977930812571135,
+          "iyy": 0.0037454838386422507,
+          "izz": 0.0018977930731970984,
+          "ixy": 0,
+          "ixz": 4.7824263732304264e-11,
+          "iyz": 0
+        },
+        "quality": "exact_mesh",
+        "units": "kg_m2",
+        "volume_m3": 0.0006262789476473702
+      }
+    },
+    {
+      "link_id": "link_011",
+      "name": "Steering_joint_RB",
+      "part_ids": [
+        "part_006"
+      ],
+      "mass": 0.34155445591618244,
+      "inertia": {
+        "ixx": 0.00024338633176923592,
+        "iyy": 0.00021820913705247066,
+        "izz": 0.00028851635018971165,
+        "ixy": -1.0078114820953662e-8,
+        "ixz": -6.842269649375869e-9,
+        "iyz": -0.000008741703456959157
+      },
+      "visual_meshes": [],
+      "collision_meshes": [],
+      "sites": [],
+      "mass_properties": {
+        "source": "geometry",
+        "mass": 0.34155445591618244,
+        "com_xyz_cad": [
+          -148.09733928715315,
+          -160.76555464296635,
+          -20.876578210949027
+        ],
+        "inertia_com_cad": {
+          "ixx": 0.00024338633176923592,
+          "iyy": 0.00021820913705247066,
+          "izz": 0.00028851635018971165,
+          "ixy": -1.0078114820953662e-8,
+          "ixz": -6.842269649375869e-9,
+          "iyz": -0.000008741703456959157
+        },
+        "quality": "exact_mesh",
+        "units": "kg_m2",
+        "volume_m3": 0.00028462871326348537
+      }
+    },
+    {
+      "link_id": "link_012",
+      "name": "Posture_control_joint_RB",
+      "part_ids": [
+        "part_009"
+      ],
+      "mass": 0.03539997329864274,
+      "inertia": {
+        "ixx": 0.000028989484092311498,
+        "iyy": 0.00003142071905399533,
+        "izz": 0.000003021234516641367,
+        "ixy": 0,
+        "ixz": 0.000002472486900232341,
+        "iyz": 0
+      },
+      "visual_meshes": [],
+      "collision_meshes": [],
+      "sites": [],
+      "mass_properties": {
+        "source": "geometry",
+        "mass": 0.03539997329864274,
+        "com_xyz_cad": [
+          -151.61821749169266,
+          -219.1546936110944,
+          -0.4769192393799911
+        ],
+        "inertia_com_cad": {
+          "ixx": 0.000028989484092311498,
+          "iyy": 0.00003142071905399533,
+          "izz": 0.000003021234516641367,
+          "ixy": 0,
+          "ixz": 0.000002472486900232341,
+          "iyz": 0
+        },
+        "quality": "exact_mesh",
+        "units": "kg_m2",
+        "volume_m3": 0.00002949997774886895
+      }
+    },
+    {
+      "link_id": "link_013",
+      "name": "Wheel_joint_RB",
+      "part_ids": [
+        "part_012"
+      ],
+      "mass": 0.751534751103389,
+      "inertia": {
+        "ixx": 0.0018977932172733905,
+        "iyy": 0.0037454839774560245,
+        "izz": 0.0018977930769231357,
+        "ixy": 0,
+        "ixz": -3.1164675030140364e-11,
+        "iyz": 0
+      },
+      "visual_meshes": [],
+      "collision_meshes": [],
+      "sites": [],
+      "mass_properties": {
+        "source": "geometry",
+        "mass": 0.751534751103389,
+        "com_xyz_cad": [
+          -155.1412162460339,
+          -234.1546936110931,
+          36.85722700882606
+        ],
+        "inertia_com_cad": {
+          "ixx": 0.0018977932172733905,
+          "iyy": 0.0037454839774560245,
+          "izz": 0.0018977930769231357,
+          "ixy": 0,
+          "ixz": -3.1164675030140364e-11,
+          "iyz": 0
+        },
+        "quality": "exact_mesh",
+        "units": "kg_m2",
+        "volume_m3": 0.0006262789592528242
+      }
+    }
+  ],
+  "joints": [
+    {
+      "joint_id": "base_A1_joint",
+      "name": "Steering_joint_LF",
+      "type": "revolute",
+      "parent": "chassis",
+      "child": "Steering_joint_LF",
+      "origin": {
+        "xyz": [
+          151.904785155,
+          140.90628051000004,
+          7.1889343250000195
+        ],
+        "rpy": [
+          0,
+          0,
+          1.5707963267948966
+        ]
+      },
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "limit": {
+        "lower": -0.78,
+        "upper": 0,
+        "effort": 10,
+        "velocity": 5
+      },
+      "actuation": "auto",
+      "frame_orientation_mode": "axis_aligned"
+    },
+    {
+      "joint_id": "base_A2_joint",
+      "name": "Posture_control_joint_LF",
+      "type": "continuous",
+      "parent": "Steering_joint_LF",
+      "child": "Posture_control_joint_LF",
+      "origin": {
+        "xyz": [
+          151.904785155,
+          186.97594541,
+          -37.811065674999966
+        ],
+        "rpy": [
+          -1.5707963267948966,
+          0,
+          3.141592653589793
+        ]
+      },
+      "axis": [
+        0,
+        -1,
+        0
+      ],
+      "limit": {
+        "lower": 0,
+        "upper": 0,
+        "effort": 10,
+        "velocity": 5
+      },
+      "actuation": "auto",
+      "frame_orientation_mode": "axis_aligned"
+    },
+    {
+      "joint_id": "base_A3_joint",
+      "name": "Wheel_joint_LF",
+      "type": "continuous",
+      "parent": "Posture_control_joint_LF",
+      "child": "Wheel_joint_LF",
+      "origin": {
+        "xyz": [
+          222.88698683500002,
+          205.96724705000003,
+          -13.592745244999968
+        ],
+        "rpy": [
+          1.5707963267948966,
+          0,
+          3.141592653589793
+        ]
+      },
+      "axis": [
+        0,
+        1,
+        0
+      ],
+      "limit": {
+        "lower": 0,
+        "upper": 0,
+        "effort": 10,
+        "velocity": 5
+      },
+      "actuation": "auto",
+      "frame_orientation_mode": "axis_aligned"
+    },
+    {
+      "joint_id": "base_B1_joint",
+      "name": "Steering_joint_RF",
+      "type": "revolute",
+      "parent": "chassis",
+      "child": "Steering_joint_RF",
+      "origin": {
+        "xyz": [
+          151.904785155,
+          -159.09371948999996,
+          7.1889343250000195
+        ],
+        "rpy": [
+          0,
+          0,
+          1.5707963267948966
+        ]
+      },
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "limit": {
+        "lower": 0,
+        "upper": 0.78,
+        "effort": 10,
+        "velocity": 5
+      },
+      "actuation": "auto",
+      "frame_orientation_mode": "axis_aligned"
+    },
+    {
+      "joint_id": "base_B2_joint",
+      "name": "Posture_control_joint_RF",
+      "type": "continuous",
+      "parent": "Steering_joint_RF",
+      "child": "Posture_control_joint_RF",
+      "origin": {
+        "xyz": [
+          151.904785155,
+          -219.15468603,
+          -37.811065674999966
+        ],
+        "rpy": [
+          1.5707963267948966,
+          0,
+          3.141592653589793
+        ]
+      },
+      "axis": [
+        0,
+        1,
+        0
+      ],
+      "limit": {
+        "lower": 0,
+        "upper": 0,
+        "effort": 10,
+        "velocity": 5
+      },
+      "actuation": "auto",
+      "frame_orientation_mode": "axis_aligned"
+    },
+    {
+      "joint_id": "base_B3_joint",
+      "name": "Wheel_joint_RF",
+      "type": "continuous",
+      "parent": "Posture_control_joint_RF",
+      "child": "Wheel_joint_RF",
+      "origin": {
+        "xyz": [
+          145.232501325,
+          -224.15468603,
+          36.89154892500004
+        ],
+        "rpy": [
+          -1.5707963267948966,
+          0,
+          3.141592653589793
+        ]
+      },
+      "axis": [
+        0,
+        -1,
+        0
+      ],
+      "limit": {
+        "lower": 0,
+        "upper": 0,
+        "effort": 10,
+        "velocity": 5
+      },
+      "actuation": "auto",
+      "frame_orientation_mode": "axis_aligned"
+    },
+    {
+      "joint_id": "base_C1_joint",
+      "name": "Steering_joint_LB",
+      "type": "revolute",
+      "parent": "chassis",
+      "child": "Steering_joint_LB",
+      "origin": {
+        "xyz": [
+          -148.095214845,
+          140.90628051000004,
+          7.1889343250000195
+        ],
+        "rpy": [
+          0,
+          0,
+          1.5707963267948966
+        ]
+      },
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "limit": {
+        "lower": 0,
+        "upper": 0.78,
+        "effort": 10,
+        "velocity": 5
+      },
+      "actuation": "auto",
+      "frame_orientation_mode": "axis_aligned"
+    },
+    {
+      "joint_id": "base_C2_joint",
+      "name": "Posture_control_joint_LB",
+      "type": "continuous",
+      "parent": "Steering_joint_LB",
+      "child": "Posture_control_joint_LB",
+      "origin": {
+        "xyz": [
+          -148.095214845,
+          200.96724705000003,
+          -37.811065674999966
+        ],
+        "rpy": [
+          -1.5707963267948966,
+          0,
+          3.141592653589793
+        ]
+      },
+      "axis": [
+        0,
+        -1,
+        0
+      ],
+      "limit": {
+        "lower": 0,
+        "upper": 0,
+        "effort": 10,
+        "velocity": 5
+      },
+      "actuation": "auto",
+      "frame_orientation_mode": "axis_aligned"
+    },
+    {
+      "joint_id": "base_C3_joint",
+      "name": "Wheel_joint_LB",
+      "type": "continuous",
+      "parent": "Posture_control_joint_LB",
+      "child": "Wheel_joint_LB",
+      "origin": {
+        "xyz": [
+          -223.039374495,
+          205.96724705000003,
+          -40.704667904999965
+        ],
+        "rpy": [
+          1.5707963267948966,
+          0,
+          3.141592653589793
+        ]
+      },
+      "axis": [
+        0,
+        1,
+        0
+      ],
+      "limit": {
+        "lower": 0,
+        "upper": 0,
+        "effort": 10,
+        "velocity": 5
+      },
+      "actuation": "auto",
+      "frame_orientation_mode": "axis_aligned"
+    },
+    {
+      "joint_id": "base_D1_joint",
+      "name": "Steering_joint_RB",
+      "type": "revolute",
+      "parent": "chassis",
+      "child": "Steering_joint_RB",
+      "origin": {
+        "xyz": [
+          -148.095214845,
+          -159.09371948999996,
+          7.1889343250000195
+        ],
+        "rpy": [
+          0,
+          0,
+          1.5707963267948966
+        ]
+      },
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "limit": {
+        "lower": -0.76,
+        "upper": 0,
+        "effort": 10,
+        "velocity": 5
+      },
+      "actuation": "auto",
+      "frame_orientation_mode": "axis_aligned"
+    },
+    {
+      "joint_id": "base_D2_joint",
+      "name": "Posture_control_joint_RB",
+      "type": "continuous",
+      "parent": "Steering_joint_RB",
+      "child": "Posture_control_joint_RB",
+      "origin": {
+        "xyz": [
+          -148.095214845,
+          -219.15468603,
+          -37.811065674999966
+        ],
+        "rpy": [
+          1.5707963267948966,
+          0,
+          3.141592653589793
+        ]
+      },
+      "axis": [
+        0,
+        1,
+        0
+      ],
+      "limit": {
+        "lower": 0,
+        "upper": 0,
+        "effort": 10,
+        "velocity": 5
+      },
+      "actuation": "auto",
+      "frame_orientation_mode": "axis_aligned"
+    },
+    {
+      "joint_id": "base_D3_joint",
+      "name": "Wheel_joint_RB",
+      "type": "continuous",
+      "parent": "Posture_control_joint_RB",
+      "child": "Wheel_joint_RB",
+      "origin": {
+        "xyz": [
+          -155.14121748500003,
+          -224.15468603,
+          36.85722643500003
+        ],
+        "rpy": [
+          -1.5707963267948966,
+          0,
+          3.141592653589793
+        ]
+      },
+      "axis": [
+        0,
+        -1,
+        0
+      ],
+      "limit": {
+        "lower": 0,
+        "upper": 0,
+        "effort": 10,
+        "velocity": 5
+      },
+      "actuation": "auto",
+      "frame_orientation_mode": "axis_aligned"
+    }
+  ],
+  "base_origin_mode": "cad_original",
+  "base_origin_xyz": [
+    0,
+    -9.093719490000012,
+    -1.904785160000003
+  ]
+}
