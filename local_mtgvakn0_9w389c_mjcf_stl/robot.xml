@@ -3,9 +3,8 @@
   <compiler angle="radian" eulerseq="xyz" autolimits="true" balanceinertia="true" boundinertia="1e-8" />
   
   <default>
-    <!-- 默认摩擦力设置：适合轮式机器人的地面抓地 -->
     <geom friction="1.2 0.005 0.0001" solref="0.004 1" solimp="0.9 0.95 0.001" />
-    <joint damping="0.1" armature="0.01" />
+    <joint damping="0.5" armature="0.05" />
   </default>
 
   <asset>
@@ -25,52 +24,42 @@
   </asset>
 
   <worldbody>
-    <!-- 添加简易地面 -->
     <geom name="floor" type="plane" size="10 10 0.1" pos="0 0 0" />
 
-    <!-- 机器人 Base: 初始高度抬高 0.2m 防止卡进地面 -->
-    <body name="chassis" pos="0 0 0.25">
-      <!-- 浮动基座：允许车身在空间中 6 自由度运动 -->
+    <body name="chassis" pos="0 0 0.35">
       <freejoint name="root" />
 
       <inertial pos="0.0019047851 0 0.049093719" mass="14.996783" quat="1 0 0 0" diaginertia="0.20788229 0.20788229 0.39976801" />
       <geom name="chassis_mesh_1" type="mesh" mesh="part_001_solid_001" pos="0 0.0090937195 0.0019047852" euler="0 0 0" group="1" />
-      
-      <!-- IMU 传感器挂载点 -->
       <site name="imu_site" pos="0 0 0.05" size="0.01" />
 
-      <!-- ==================== Front Left (FL) ==================== -->
+      <!-- Front Left -->
       <body name="Steering_joint_LF" pos="0.15190479 0.15 0.0090937195" euler="0 0 1.5707963">
         <joint name="Steering_joint_LF" type="hinge" pos="0 0 0" axis="0 0 1" />
         <inertial pos="0.0016718354 -2.125219e-06 -0.028065513" mass="0.34155445" quat="0.9981442 4.7558172e-05 0.060894316 -0.00020962731" diaginertia="0.00021713852 0.00024338633 0.00028958694" />
         <geom name="Steering_joint_LF_mesh_1" type="mesh" mesh="part_002_solid_002" pos="-0.14090628 0.15190479 -0.0071889343" euler="0 0 -1.5707963" group="1" />
-        
         <body name="Posture_control_joint_LF" pos="0.046069665 0 -0.045" euler="-1.5707963 -1.5707963 0">
           <joint name="Posture_control_joint_LF" type="hinge" pos="0 0 0" axis="0 0 1" />
           <inertial pos="-0.035491101 -0.01210916 -0.013991309" mass="0.035399978" quat="0.98651643 0 0 0.16366223" diaginertia="2.7879217e-06 2.9222798e-05 3.142072e-05" />
           <geom name="Posture_control_joint_LF_mesh_1" type="mesh" mesh="part_003_solid_003" pos="0.15190479 -0.037811066 0.18697595" euler="1.5707963 0 -3.1415927" group="1" />
-          
           <body name="Wheel_joint_LF" pos="-0.070982202 -0.02421832 -0.018991302" euler="3.1415927 0 0">
             <joint name="Wheel_joint_LF" type="hinge" pos="0 0 0" axis="0 0 1" />
             <inertial pos="1.3494803e-10 0 0.010000008" mass="0.75153473" quat="0.99861459 0 0 0.052620393" diaginertia="0.0018977931 0.001897793 0.0037454838" />
-            <!-- 视觉网格 (group 1) 与 碰撞网格 (group 0) -->
             <geom name="Wheel_joint_LF_mesh_1" type="mesh" mesh="part_004_solid_004" pos="0.22288699 0.013592745 -0.20596725" euler="-1.5707963 0 -3.1415927" group="1" />
             <geom name="Wheel_LF_col" type="mesh" mesh="part_004_solid_004" pos="0.22288699 0.013592745 -0.20596725" euler="-1.5707963 0 -3.1415927" group="0" condim="3" />
           </body>
         </body>
       </body>
 
-      <!-- ==================== Front Right (FR) ==================== -->
+      <!-- Front Right -->
       <body name="Steering_joint_RF" pos="0.15190479 -0.15 0.0090937195" euler="0 0 1.5707963">
         <joint name="Steering_joint_RF" type="hinge" pos="0 0 0" axis="0 0 1" />
         <inertial pos="-0.001671834 2.124541e-06 -0.028065513" mass="0.34155445" quat="0.9981442 -4.7524281e-05 -0.060894306 -0.00020970841" diaginertia="0.00021713852 0.00024338633 0.00028958695" />
         <geom name="Steering_joint_RF_mesh_1" type="mesh" mesh="part_007_solid_007" pos="0.15909372 0.15190479 -0.0071889343" euler="0 0 -1.5707963" group="1" />
-        
         <body name="Posture_control_joint_RF" pos="-0.060060967 0 -0.045" euler="1.5707963 1.5707963 0">
           <joint name="Posture_control_joint_RF" type="hinge" pos="0 0 0" axis="0 0 1" />
           <inertial pos="0.0033361433 0.037351307 -7.5810947e-09" mass="0.035399976" quat="0.99900822 0 0 -0.044526062" diaginertia="2.9222798e-05 2.7879213e-06 3.142072e-05" />
           <geom name="Posture_control_joint_RF_mesh_1" type="mesh" mesh="part_010_solid_010" pos="0.15190479 0.037811066 0.21915469" euler="-1.5707963 0 -3.1415927" group="1" />
-          
           <body name="Wheel_joint_RF" pos="0.0066722838 0.074702615 -0.005" euler="-3.1415927 0 0">
             <joint name="Wheel_joint_RF" type="hinge" pos="0 0 0" axis="0 0 1" />
             <inertial pos="-9.4547967e-10 -3.268282e-10 0.010000008" mass="0.75153475" quat="0.93536494 0 0 -0.35368408" diaginertia="0.0018977931 0.0018977931 0.003745484" />
@@ -80,17 +69,15 @@
         </body>
       </body>
 
-      <!-- ==================== Rear Left (RL) ==================== -->
+      <!-- Rear Left -->
       <body name="Steering_joint_LB" pos="-0.14809521 0.15 0.0090937195" euler="0 0 1.5707963">
         <joint name="Steering_joint_LB" type="hinge" pos="0 0 0" axis="0 0 1" />
         <inertial pos="0.0016718342 -2.1248196e-06 -0.028065513" mass="0.34155446" quat="0.9981442 4.7518247e-05 0.060894305 -0.00020975219" diaginertia="0.00021713853 0.00024338634 0.00028958696" />
         <geom name="Steering_joint_LB_mesh_1" type="mesh" mesh="part_005_solid_005" pos="-0.14090628 -0.14809521 -0.0071889343" euler="0 0 -1.5707963" group="1" />
-        
         <body name="Posture_control_joint_LB" pos="0.060060967 0 -0.045" euler="-1.5707963 -1.5707963 0">
           <joint name="Posture_control_joint_LB" type="hinge" pos="0 0 0" axis="0 0 1" />
           <inertial pos="0.037472079 0.0014468008 -7.581094e-09" mass="0.03539998" quat="0.99981385 0 0 0.019294275" diaginertia="2.7879221e-06 2.9222802e-05 3.1420724e-05" />
           <geom name="Posture_control_joint_LB_mesh_1" type="mesh" mesh="part_008_solid_008" pos="-0.14809521 -0.037811066 0.20096725" euler="1.5707963 0 -3.1415927" group="1" />
-          
           <body name="Wheel_joint_LB" pos="0.07494416 0.0028936022 -0.005" euler="3.1415927 0 0">
             <joint name="Wheel_joint_LB" type="hinge" pos="0 0 0" axis="0 0 1" />
             <inertial pos="0 4.538612e-10 0.010000008" mass="0.75153474" quat="0.9317178 0 0 -0.36318308" diaginertia="0.0018977931 0.001897793 0.0037454838" />
@@ -100,17 +87,15 @@
         </body>
       </body>
 
-      <!-- ==================== Rear Right (RR) ==================== -->
+      <!-- Rear Right -->
       <body name="Steering_joint_RB" pos="-0.14809521 -0.15 0.0090937195" euler="0 0 1.5707963">
         <joint name="Steering_joint_RB" type="hinge" pos="0 0 0" axis="0 0 1" />
         <inertial pos="-0.0016718352 2.1244422e-06 -0.028065513" mass="0.34155446" quat="0.9981442 -4.7561227e-05 -0.060894308 -0.00020968616" diaginertia="0.00021713853 0.00024338634 0.00028958695" />
         <geom name="Steering_joint_RB_mesh_1" type="mesh" mesh="part_006_solid_006" pos="0.15909372 -0.14809521 -0.0071889343" euler="0 0 -1.5707963" group="1" />
-        
         <body name="Posture_control_joint_RB" pos="-0.060060967 0 -0.045" euler="1.5707963 1.5707963 0">
           <joint name="Posture_control_joint_RB" type="hinge" pos="0 0 0" axis="0 0 1" />
           <inertial pos="0.0035230026 0.037334146 -7.5810944e-09" mass="0.035399973" quat="0.99889369 0 0 -0.047025398" diaginertia="2.9222798e-05 2.7879205e-06 3.1420719e-05" />
           <geom name="Posture_control_joint_RB_mesh_1" type="mesh" mesh="part_009_solid_009" pos="-0.14809521 0.037811066 0.21915469" euler="-1.5707963 0 -3.1415927" group="1" />
-          
           <body name="Wheel_joint_RB" pos="0.0070460026 0.074668292 -0.005" euler="-3.1415927 0 0">
             <joint name="Wheel_joint_RB" type="hinge" pos="0 0 0" axis="0 0 1" />
             <inertial pos="-1.2389661e-09 -5.7382603e-10 0.010000008" mass="0.75153475" quat="0.99454652 0 0 -0.10429387" diaginertia="0.0018977932 0.0018977931 0.003745484" />
@@ -122,32 +107,35 @@
     </body>
   </worldbody>
 
-  <!-- ==================== 执行器定义 ==================== -->
   <actuator>
-    <!-- 1. 转向关节：使用内置 position 控制器 (PD) 跟踪期望角度 -->
-    <position name="act_steer_FL" joint="Steering_joint_LF" kp="100" kv="5" forcerange="-30 30" />
-    <position name="act_steer_FR" joint="Steering_joint_RF" kp="100" kv="5" forcerange="-30 30" />
-    <position name="act_steer_RL" joint="Steering_joint_LB" kp="100" kv="5" forcerange="-30 30" />
-    <position name="act_steer_RR" joint="Steering_joint_RB" kp="100" kv="5" forcerange="-30 30" />
+    <!-- 转向伺服电机 -->
+    <position name="act_steer_FL" joint="Steering_joint_LF" kp="80" kv="5" forcerange="-80 80" />
+    <position name="act_steer_FR" joint="Steering_joint_RF" kp="80" kv="5" forcerange="-80 80" />
+    <position name="act_steer_RL" joint="Steering_joint_LB" kp="80" kv="5" forcerange="-80 80" />
+    <position name="act_steer_RR" joint="Steering_joint_RB" kp="80" kv="5" forcerange="-80 80" />
 
-    <!-- 2. 轮子驱动关节：使用 velocity 控制器跟踪期望角速度 (PI) -->
+    <!-- 偏心姿态电机 -->
+    <position name="act_ecc_FL" joint="Posture_control_joint_LF" kp="100" kv="8" forcerange="-100 100" />
+    <position name="act_ecc_FR" joint="Posture_control_joint_RF" kp="100" kv="8" forcerange="-100 100" />
+    <position name="act_ecc_RL" joint="Posture_control_joint_LB" kp="100" kv="8" forcerange="-100 100" />
+    <position name="act_ecc_RR" joint="Posture_control_joint_RB" kp="100" kv="8" forcerange="-100 100" />
+
+    <!-- 驱动轮电机 -->
     <velocity name="act_wheel_FL" joint="Wheel_joint_LF" kv="5" forcerange="-30 30" />
     <velocity name="act_wheel_FR" joint="Wheel_joint_RF" kv="5" forcerange="-30 30" />
     <velocity name="act_wheel_RL" joint="Wheel_joint_LB" kv="5" forcerange="-30 30" />
     <velocity name="act_wheel_RR" joint="Wheel_joint_RB" kv="5" forcerange="-30 30" />
-
-    <!-- 3. 偏心姿态关节：配置为直接力矩控制 (motor)，以便后续下发 GRF 优化和姿态力矩 -->
-    <motor name="act_ecc_FL" joint="Posture_control_joint_LF" forcerange="-50 50" />
-    <motor name="act_ecc_FR" joint="Posture_control_joint_RF" forcerange="-50 50" />
-    <motor name="act_ecc_RL" joint="Posture_control_joint_LB" forcerange="-50 50" />
-    <motor name="act_ecc_RR" joint="Posture_control_joint_RB" forcerange="-50 50" />
   </actuator>
 
-  <!-- ==================== 传感器定义 ==================== -->
   <sensor>
     <framelinvel name="body_vel" objtype="site" objname="imu_site" />
     <gyro name="body_gyro" site="imu_site" />
     <accelerometer name="body_acc" site="imu_site" />
     <framequat name="body_quat" objtype="site" objname="imu_site" />
   </sensor>
+
+  <keyframe>
+    <!-- 只修改偏心关节初始位姿，转向角全设为 0.0 -->
+    <key name="stand" qpos="0 0 0.35  1 0 0 0  0.0 -1.9069 0.0  0.0 -3.0576 0.0  0.0 1.5315 0.0  0.0 -3.0522 0.0" />
+  </keyframe>
 </mujoco>
