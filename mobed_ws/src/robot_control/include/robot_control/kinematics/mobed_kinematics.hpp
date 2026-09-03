@@ -30,21 +30,24 @@ public:
     MobedKinematics(const MobedParameters& params = MobedParameters());
 
     /**
-     * @brief Compute Driving Inverse Kinematics (Swerve Drive)
+     * @brief Compute Driving Inverse Kinematics (Swerve Drive with continuous rotation)
      * 
      * @param v_body [v_x, v_y, omega_z] target velocity of the body
+     * @param current_steer_angles [FL, FR, RL, RR] Current steering angles for shortest-path optimization
      * @return std::tuple<Eigen::Vector4d, Eigen::Vector4d> 
      *         Tuple of (steer_angles [FL, FR, RL, RR], wheel_speeds [FL, FR, RL, RR])
      */
     std::tuple<Eigen::Vector4d, Eigen::Vector4d> computeDrivingIK(
-        const Eigen::Vector3d& v_body) const;
+        const Eigen::Vector3d& v_body,
+        const Eigen::Vector4d& current_steer_angles) const;
 
     /**
-     * @brief Compute Posture Inverse Kinematics
+     * @brief Compute Posture Inverse Kinematics (Exact Non-linear Solution)
      * 
      * @param target_height Target distance from ground to base origin
      * @param target_roll Target roll angle (radians)
      * @param target_pitch Target pitch angle (radians)
+     * @param current_steer_angles [FL, FR, RL, RR] Steering angles needed for exact geometric projection
      * @param outward_config If true, uses q_ecc > 0 (wheels outward). Else wheels inward.
      * @return Eigen::Vector4d Target eccentric angles [FL, FR, RL, RR]
      */
@@ -52,6 +55,7 @@ public:
         double target_height, 
         double target_roll, 
         double target_pitch,
+        const Eigen::Vector4d& current_steer_angles,
         bool outward_config = true) const;
 
     /**
@@ -66,6 +70,9 @@ private:
     
     // Enumeration for leg indices
     enum LegIndex { FL = 0, FR = 1, RL = 2, RR = 3 };
+    
+    // Utility to normalize angle to [-pi, pi]
+    double normalize_angle(double angle) const;
 };
 
 } // namespace kinematics
