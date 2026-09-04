@@ -12,23 +12,17 @@ find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(robot_interfaces REQUIRED)
 
-# Include directories - Using SYSTEM for Eigen to suppress its internal warnings
-include_directories(
-  include
-)
+# Include directories
+include_directories(include)
 include_directories(SYSTEM ${EIGEN3_INCLUDE_DIRS})
 
 # Core Kinematics Library
-add_library(mobed_kinematics SHARED
-  src/kinematics/mobed_kinematics.cpp
-)
+add_library(mobed_kinematics SHARED src/kinematics/mobed_kinematics.cpp)
 target_include_directories(mobed_kinematics PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
 )
-target_include_directories(mobed_kinematics SYSTEM PUBLIC
-  ${EIGEN3_INCLUDE_DIRS}
-)
+target_include_directories(mobed_kinematics SYSTEM PUBLIC ${EIGEN3_INCLUDE_DIRS})
 
 # Controller Classes Library
 add_library(mobed_controllers SHARED
@@ -39,12 +33,8 @@ target_include_directories(mobed_controllers PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
 )
-target_include_directories(mobed_controllers SYSTEM PUBLIC
-  ${EIGEN3_INCLUDE_DIRS}
-)
-target_link_libraries(mobed_controllers PUBLIC
-  mobed_kinematics
-)
+target_include_directories(mobed_controllers SYSTEM PUBLIC ${EIGEN3_INCLUDE_DIRS})
+target_link_libraries(mobed_controllers PUBLIC mobed_kinematics)
 
 # ROS2 Node Executable
 add_executable(mobed_control_node src/mobed_control_node.cpp)
@@ -60,9 +50,19 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 endif()
 
+# INSTALL TARGETS (FIXED)
 install(TARGETS
+  mobed_kinematics
+  mobed_controllers
   mobed_control_node
-  DESTINATION lib/${PROJECT_NAME}
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION lib/${PROJECT_NAME}
+)
+
+# Install include directory so other packages can use the headers
+install(DIRECTORY include/
+  DESTINATION include
 )
 
 ament_export_include_directories(include)

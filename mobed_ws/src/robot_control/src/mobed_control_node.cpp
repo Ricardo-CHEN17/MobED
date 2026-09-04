@@ -12,7 +12,6 @@ namespace robot_control {
 class MobedControlNode : public rclcpp::Node {
 public:
     MobedControlNode() : Node("mobed_control_node") {
-        // 1. Initialize mathematical kinematics and controllers
         auto kinematics = std::make_shared<kinematics::MobedKinematics>();
         
         controllers::DrivingControllerParams drive_params;
@@ -21,12 +20,16 @@ public:
         driving_controller_ = std::make_unique<controllers::DrivingController>(drive_params, kinematics);
         balance_controller_ = std::make_unique<controllers::BalanceController>(balance_params, kinematics);
         
-        // 2. Initialize Internal States
         curr_steer_angles_.setZero();
         curr_ecc_angles_.setZero();
         cmd_vel_.setZero();
         
-        // 3. Create Subscribers
+        // Polarity Mapping Setup (FL, FR, RL, RR)
+        // If a CAD joint rotates backwards relative to the math model, change 1.0 to -1.0 here.
+        steer_signs_ = {1.0, 1.0, 1.0, 1.0};
+        ecc_signs_   = {-1.0, 1.0, -1.0, 1.0};
+        wheel_signs_ = {-1.0, 1.0, -1.0, 1.0};
+        
         sub_cmd_ = this->create_subscription<robot_interfaces::msg::MobEDCommand>(
             "/mobed/command", 10, std::bind(&MobedControlNode::commandCallback, this, std::placeholders::_1));
             
@@ -36,14 +39,12 @@ public:
         sub_e_stop_ = this->create_subscription<std_msgs::msg::Bool>(
             "/e_stop", 10, std::bind(&MobedControlNode::eStopCallback, this, std::placeholders::_1));
             
-        // 4. Create Publishers
         pub_joint_cmds_ = this->create_publisher<sensor_msgs::msg::JointState>("/mobed/joint_commands", 10);
         
-        // 5. Create 100Hz Control Loop Timer
         timer_ = this->create_wall_timer(10ms, std::bind(&MobedControlNode::timerCallback, this));
         last_time_ = this->now();
         
-        RCLCPP_INFO(this->get_logger(), "MobED Control Node started successfully.");
+        RCLCPP_INFO(this->get_logger(), "MobED Control Node started successfully. Polarity mappings enabled.");
     }
     
 private:
@@ -62,16 +63,16 @@ private:
             const auto& name = msg->name[i];
             double pos = msg->position[i];
             
-            // Map names perfectly matched with MuJoCo XML
-            if (name == "Steering_joint_LF") curr_steer_angles_(0) = pos;
-            else if (name == "Steering_joint_RF") curr_steer_angles_(1) = pos;
-            else if (name == "Steering_joint_LB") curr_steer_angles_(2) = pos;
-            else if (name == "Steering_joint_RB") curr_steer_angles_(3) = pos;
+            // Map names and apply polarity to convert from CAD coords to Math coords
+            if (name == "Steering_joint_LF") curr_steer_angles_(0) = pos * steer_signs_[0];
+            else if (name == "Steering_joint_RF") curr_steer_angles_(1) = pos * steer_signs_[1];
+            else if (name == "Steering_joint_LB") curr_steer_angles_(2) = pos * steer_signs_[2];
+            else if (name == "Steering_joint_RB") curr_steer_angles_(3) = pos * steer_signs_[3];
             
-            else if (name == "Posture_control_joint_LF") curr_ecc_angles_(0) = pos;
-            else if (name == "Posture_control_joint_RF") curr_ecc_angles_(1) = pos;
-            else if (name == "Posture_control_joint_LB") curr_ecc_angles_(2) = pos;
-            else if (name == "Posture_control_joint_RB") curr_ecc_angles_(3) = pos;
+            else if (name == "Posture_control_joint_LF") curr_ecc_angles_(0) = pos * ecc_signs_[0];
+            else if (name == "Posture_control_joint_RF") curr_ecc_angles_(1) = pos * ecc_signs_[1];
+            else if (name == "Posture_control_joint_LB") curr_ecc_angles_(2) = pos * ecc_signs_[2];
+            else if (name == "Posture_control_joint_RB") curr_ecc_angles_(3) = pos * ecc_signs_[3];
         }
     }
     
@@ -87,18 +88,14 @@ private:
         double dt = (now - last_time_).seconds();
         last_time_ = now;
         
-        // Prevent huge dt jumps (e.g. simulation pause/resume)
         if (dt <= 0.0 || dt > 0.1) dt = 0.01;
         
-        // Run Driving Controller (returns target steer and target wheel speeds)
         auto [target_steer, target_wheel] = driving_controller_->update(
             cmd_vel_, curr_steer_angles_, curr_ecc_angles_, dt, e_stop_active_);
             
-        // Run Balance Controller (returns target eccentric angles)
         Eigen::Vector4d target_ecc = balance_controller_->update(
             target_height_, target_roll_, target_pitch_, curr_steer_angles_, curr_ecc_angles_, dt, e_stop_active_);
             
-        // Pack into JointState and Publish
         sensor_msgs::msg::JointState cmd_msg;
         cmd_msg.header.stamp = now;
         
@@ -107,20 +104,18 @@ private:
         std::vector<std::string> wheel_names = {"Wheel_joint_LF", "Wheel_joint_RF", "Wheel_joint_LB", "Wheel_joint_RB"};
         
         for (int i = 0; i < 4; ++i) {
-            // Steer (Position control)
+            // Apply polarity to convert from Math coords back to CAD coords
             cmd_msg.name.push_back(steer_names[i]);
-            cmd_msg.position.push_back(target_steer(i));
+            cmd_msg.position.push_back(target_steer(i) * steer_signs_[i]);
             cmd_msg.velocity.push_back(0.0);
             
-            // Eccentric (Position control)
             cmd_msg.name.push_back(ecc_names[i]);
-            cmd_msg.position.push_back(target_ecc(i));
+            cmd_msg.position.push_back(target_ecc(i) * ecc_signs_[i]);
             cmd_msg.velocity.push_back(0.0);
             
-            // Wheel (Velocity control, sent via velocity field)
             cmd_msg.name.push_back(wheel_names[i]);
             cmd_msg.position.push_back(0.0);
-            cmd_msg.velocity.push_back(target_wheel(i));
+            cmd_msg.velocity.push_back(target_wheel(i) * wheel_signs_[i]);
         }
         
         pub_joint_cmds_->publish(cmd_msg);
@@ -146,6 +141,11 @@ private:
     Eigen::Vector4d curr_ecc_angles_;
     
     bool e_stop_active_ = false;
+    
+    // Polarity Mapping Arrays
+    std::vector<double> steer_signs_;
+    std::vector<double> ecc_signs_;
+    std::vector<double> wheel_signs_;
 };
 
 } // namespace robot_control

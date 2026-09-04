@@ -1,1 +1,1 @@
-/workspace/mobed_ws/install/robot_interfaces:/opt/ros/humble
+/workspace/mobed_ws/install/robot_control:/workspace/mobed_ws/install/robot_interfaces:/workspace/mobed_ws/install/robot_bringup:/workspace/mobed_ws/install/mobed_bridge:/opt/ros/humble
