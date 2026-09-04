@@ -26,6 +26,22 @@ target_include_directories(mobed_kinematics SYSTEM PUBLIC
   ${EIGEN3_INCLUDE_DIRS}
 )
 
+# Controller Classes Library
+add_library(mobed_controllers SHARED
+  src/controllers/driving_controller.cpp
+  src/controllers/balance_controller.cpp
+)
+target_include_directories(mobed_controllers PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+target_include_directories(mobed_controllers SYSTEM PUBLIC
+  ${EIGEN3_INCLUDE_DIRS}
+)
+target_link_libraries(mobed_controllers PUBLIC
+  mobed_kinematics
+)
+
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   set(ament_cmake_copyright_FOUND TRUE)
@@ -34,6 +50,7 @@ if(BUILD_TESTING)
 endif()
 
 ament_export_include_directories(include)
-ament_export_libraries(mobed_kinematics)
+ament_export_libraries(mobed_kinematics mobed_controllers)
+ament_export_dependencies(Eigen3)
 
 ament_package()
