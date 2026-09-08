@@ -40,14 +40,14 @@ std::tuple<Eigen::Vector4d, Eigen::Vector4d> DrivingController::update(
 
     // First time initialization to current hardware state
     if (!initialized_) {
-        prev_steer_angles_ = current_steer_angles;
+        
         prev_wheel_speeds_.setZero();
         initialized_ = true;
     }
 
     if (e_stop_active) {
         // E-STOP: Lock steering, stop wheels immediately
-        prev_steer_angles_ = current_steer_angles;
+        
         prev_wheel_speeds_.setZero();
         return {prev_steer_angles_, prev_wheel_speeds_};
     }

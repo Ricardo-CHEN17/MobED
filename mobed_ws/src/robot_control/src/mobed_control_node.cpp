@@ -27,8 +27,10 @@ public:
         // Polarity Mapping Setup (FL, FR, RL, RR)
         // If a CAD joint rotates backwards relative to the math model, change 1.0 to -1.0 here.
         steer_signs_ = {1.0, 1.0, 1.0, 1.0};
-        ecc_signs_   = {-1.0, 1.0, -1.0, 1.0};
-        wheel_signs_ = {-1.0, 1.0, -1.0, 1.0};
+        ecc_signs_   = {1.0, -1.0, 1.0, -1.0};
+        wheel_signs_ = {1.0, -1.0, 1.0, -1.0};
+        ecc_offsets_ = {-1.9003, -3.0526, 1.5320, -3.0473};
+
         
         sub_cmd_ = this->create_subscription<robot_interfaces::msg::MobEDCommand>(
             "/mobed/command", 10, std::bind(&MobedControlNode::commandCallback, this, std::placeholders::_1));
@@ -110,7 +112,13 @@ private:
             cmd_msg.velocity.push_back(0.0);
             
             cmd_msg.name.push_back(ecc_names[i]);
-            cmd_msg.position.push_back(target_ecc(i) * ecc_signs_[i]);
+            
+                double cad_angle = target_ecc(i) * ecc_signs_[i] + ecc_offsets_[i];
+                // Normalize to [-PI, PI] to prevent MuJoCo actuator clamping
+                while (cad_angle > M_PI) cad_angle -= 2.0 * M_PI;
+                while (cad_angle <= -M_PI) cad_angle += 2.0 * M_PI;
+                cmd_msg.position.push_back(cad_angle);
+
             cmd_msg.velocity.push_back(0.0);
             
             cmd_msg.name.push_back(wheel_names[i]);
@@ -146,6 +154,8 @@ private:
     std::vector<double> steer_signs_;
     std::vector<double> ecc_signs_;
     std::vector<double> wheel_signs_;
+    std::vector<double> ecc_offsets_; // CAD zero offset bias
+
 };
 
 } // namespace robot_control

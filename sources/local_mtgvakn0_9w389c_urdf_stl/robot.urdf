@@ -1,0 +1,334 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="generated_robot">
+  <link name="chassis">
+    <inertial>
+      <origin xyz="0.0019047851 0 0.049093719" rpy="0 0 0" />
+      <mass value="14.996783" />
+      <inertia ixx="0.20788229" iyy="0.20788229" izz="0.39976801" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0.0090937195 0.0019047852" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/part_001_solid_001.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0.0090937195 0.0019047852" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/part_001_solid_001.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="Steering_joint_LF">
+    <inertial>
+      <origin xyz="0.0016718354 -2.1252266e-06 -0.028065513" rpy="0 0 0" />
+      <mass value="0.34155445" />
+      <inertia ixx="0.00021820913" iyy="0.00024338632" izz="0.00028851634" ixy="1.0075139e-08" ixz="8.7417041e-06" iyz="-6.8412874e-09" />
+    </inertial>
+    <visual>
+      <origin xyz="-0.14090628 0.15190479 -0.0071889343" rpy="0 0 -1.5707963" />
+      <geometry>
+        <mesh filename="meshes/part_002_solid_002.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.14090628 0.15190479 -0.0071889343" rpy="0 0 -1.5707963" />
+      <geometry>
+        <mesh filename="meshes/part_002_solid_002.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="Posture_control_joint_LF">
+    <inertial>
+      <origin xyz="-0.035491101 -0.01210916 -0.013991309" rpy="0 0 0" />
+      <mass value="0.035399978" />
+      <inertia ixx="5.5443255e-06" iyy="2.6466394e-05" izz="3.142072e-05" ixy="-8.0788261e-06" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0.15190479 -0.037811066 0.18697595" rpy="-1.5707963 0 -3.1415927" />
+      <geometry>
+        <mesh filename="meshes/part_003_solid_003.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.15190479 -0.037811066 0.18697595" rpy="-1.5707963 0 -3.1415927" />
+      <geometry>
+        <mesh filename="meshes/part_003_solid_003.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="Wheel_joint_LF">
+    <inertial>
+      <origin xyz="1.2736975e-10 0 0.010000008" rpy="0 0 0" />
+      <mass value="0.75153473" />
+      <inertia ixx="0.0018977931" iyy="0.001897793" izz="0.0037454838" ixy="7.0324521e-12" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0.22288699 0.013592745 -0.20596725" rpy="1.5707963 0 -3.1415927" />
+      <geometry>
+        <mesh filename="meshes/part_004_solid_004.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.22288699 0.013592745 -0.20596725" rpy="1.5707963 0 -3.1415927" />
+      <geometry>
+        <mesh filename="meshes/part_004_solid_004.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="Steering_joint_RF">
+    <inertial>
+      <origin xyz="-0.0016718342 2.12478e-06 -0.028065513" rpy="0 0 0" />
+      <mass value="0.34155445" />
+      <inertia ixx="0.00021820913" iyy="0.00024338633" izz="0.00028851634" ixy="1.0077146e-08" ixz="-8.7417032e-06" iyz="6.8391143e-09" />
+    </inertial>
+    <visual>
+      <origin xyz="0.15909372 0.15190479 -0.0071889343" rpy="0 0 -1.5707963" />
+      <geometry>
+        <mesh filename="meshes/part_007_solid_007.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.15909372 0.15190479 -0.0071889343" rpy="0 0 -1.5707963" />
+      <geometry>
+        <mesh filename="meshes/part_007_solid_007.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="Posture_control_joint_RF">
+    <inertial>
+      <origin xyz="0.0033361432 0.037351307 -7.573517e-09" rpy="0 0 0" />
+      <mass value="0.035399976" />
+      <inertia ixx="2.9013578e-05" iyy="2.9971416e-06" izz="3.142072e-05" ixy="-2.3424222e-06" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0.15190479 0.037811066 0.21915469" rpy="1.5707963 0 -3.1415927" />
+      <geometry>
+        <mesh filename="meshes/part_010_solid_010.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.15190479 0.037811066 0.21915469" rpy="1.5707963 0 -3.1415927" />
+      <geometry>
+        <mesh filename="meshes/part_010_solid_010.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="Wheel_joint_RF">
+    <inertial>
+      <origin xyz="-9.5305775e-10 -3.2682827e-10 0.010000008" rpy="0 0 0" />
+      <mass value="0.75153475" />
+      <inertia ixx="0.0018977931" iyy="0.0018977931" izz="0.003745484" ixy="-1.0776676e-11" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0.1452325 0.036891549 -0.22415469" rpy="-1.5707963 0 -3.1415927" />
+      <geometry>
+        <mesh filename="meshes/part_013_solid_013.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.1452325 0.036891549 -0.22415469" rpy="-1.5707963 0 -3.1415927" />
+      <geometry>
+        <mesh filename="meshes/part_013_solid_013.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="Steering_joint_LB">
+    <inertial>
+      <origin xyz="0.0016718342 -2.1248272e-06 -0.028065513" rpy="0 0 0" />
+      <mass value="0.34155446" />
+      <inertia ixx="0.00021820914" iyy="0.00024338633" izz="0.00028851635" ixy="1.0082123e-08" ixz="8.7417032e-06" iyz="-6.8391409e-09" />
+    </inertial>
+    <visual>
+      <origin xyz="-0.14090628 -0.14809521 -0.0071889343" rpy="0 0 -1.5707963" />
+      <geometry>
+        <mesh filename="meshes/part_005_solid_005.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.14090628 -0.14809521 -0.0071889343" rpy="0 0 -1.5707963" />
+      <geometry>
+        <mesh filename="meshes/part_005_solid_005.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="Posture_control_joint_LB">
+    <inertial>
+      <origin xyz="0.037472079 0.0014468008 -7.5886705e-09" rpy="0 0 0" />
+      <mass value="0.03539998" />
+      <inertia ixx="2.827271e-06" iyy="2.9183453e-05" izz="3.1420724e-05" ixy="-1.0191344e-06" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="-0.14809521 -0.037811066 0.20096725" rpy="-1.5707963 0 -3.1415927" />
+      <geometry>
+        <mesh filename="meshes/part_008_solid_008.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.14809521 -0.037811066 0.20096725" rpy="-1.5707963 0 -3.1415927" />
+      <geometry>
+        <mesh filename="meshes/part_008_solid_008.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="Wheel_joint_LB">
+    <inertial>
+      <origin xyz="0 4.5386143e-10 0.010000008" rpy="0 0 0" />
+      <mass value="0.75153474" />
+      <inertia ixx="0.0018977931" iyy="0.0018977931" izz="0.0037454838" ixy="-4.7824239e-11" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="-0.22303937 0.040704668 -0.20596725" rpy="1.5707963 0 -3.1415927" />
+      <geometry>
+        <mesh filename="meshes/part_011_solid_011.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.22303937 0.040704668 -0.20596725" rpy="1.5707963 0 -3.1415927" />
+      <geometry>
+        <mesh filename="meshes/part_011_solid_011.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="Steering_joint_RB">
+    <inertial>
+      <origin xyz="-0.0016718354 2.1246811e-06 -0.028065513" rpy="0 0 0" />
+      <mass value="0.34155445" />
+      <inertia ixx="0.00021820913" iyy="0.00024338633" izz="0.00028851634" ixy="1.0075471e-08" ixz="-8.7417034e-06" iyz="6.8422165e-09" />
+    </inertial>
+    <visual>
+      <origin xyz="0.15909372 -0.14809521 -0.0071889343" rpy="0 0 -1.5707963" />
+      <geometry>
+        <mesh filename="meshes/part_006_solid_006.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.15909372 -0.14809521 -0.0071889343" rpy="0 0 -1.5707963" />
+      <geometry>
+        <mesh filename="meshes/part_006_solid_006.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="Posture_control_joint_RB">
+    <inertial>
+      <origin xyz="0.0035230026 0.037334146 -7.5735161e-09" rpy="0 0 0" />
+      <mass value="0.035399973" />
+      <inertia ixx="2.8989484e-05" iyy="3.0212345e-06" izz="3.1420719e-05" ixy="-2.4724869e-06" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="-0.14809521 0.037811066 0.21915469" rpy="1.5707963 0 -3.1415927" />
+      <geometry>
+        <mesh filename="meshes/part_009_solid_009.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.14809521 0.037811066 0.21915469" rpy="1.5707963 0 -3.1415927" />
+      <geometry>
+        <mesh filename="meshes/part_009_solid_009.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="Wheel_joint_RB">
+    <inertial>
+      <origin xyz="-1.2465447e-09 -5.7382597e-10 0.010000008" rpy="0 0 0" />
+      <mass value="0.75153475" />
+      <inertia ixx="0.0018977932" iyy="0.0018977931" izz="0.003745484" ixy="-3.1164684e-11" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="-0.15514122 0.036857226 -0.22415469" rpy="-1.5707963 0 -3.1415927" />
+      <geometry>
+        <mesh filename="meshes/part_012_solid_012.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.15514122 0.036857226 -0.22415469" rpy="-1.5707963 0 -3.1415927" />
+      <geometry>
+        <mesh filename="meshes/part_012_solid_012.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="Steering_joint_LF" type="revolute">
+    <origin xyz="0.15190479 0.15 0.0090937195" rpy="0 0 1.5707963" />
+    <parent link="chassis" />
+    <child link="Steering_joint_LF" />
+    <axis xyz="0 0 1" />
+    <limit lower="-0.78" upper="0" effort="10" velocity="5" />
+  </joint>
+  <joint name="Posture_control_joint_LF" type="continuous">
+    <origin xyz="0.046069665 0 -0.045" rpy="-1.5707963 0 1.5707963" />
+    <parent link="Steering_joint_LF" />
+    <child link="Posture_control_joint_LF" />
+    <axis xyz="0 0 1" />
+    <limit effort="10" velocity="5" />
+  </joint>
+  <joint name="Wheel_joint_LF" type="continuous">
+    <origin xyz="-0.070982202 -0.02421832 -0.018991302" rpy="3.1415927 0 0" />
+    <parent link="Posture_control_joint_LF" />
+    <child link="Wheel_joint_LF" />
+    <axis xyz="0 0 1" />
+    <limit effort="10" velocity="5" />
+  </joint>
+  <joint name="Steering_joint_RF" type="revolute">
+    <origin xyz="0.15190479 -0.15 0.0090937195" rpy="0 0 1.5707963" />
+    <parent link="chassis" />
+    <child link="Steering_joint_RF" />
+    <axis xyz="0 0 1" />
+    <limit lower="0" upper="0.78" effort="10" velocity="5" />
+  </joint>
+  <joint name="Posture_control_joint_RF" type="continuous">
+    <origin xyz="-0.060060967 0 -0.045" rpy="1.5707963 0 1.5707963" />
+    <parent link="Steering_joint_RF" />
+    <child link="Posture_control_joint_RF" />
+    <axis xyz="0 0 1" />
+    <limit effort="10" velocity="5" />
+  </joint>
+  <joint name="Wheel_joint_RF" type="continuous">
+    <origin xyz="0.0066722838 0.074702615 -0.005" rpy="-3.1415927 0 0" />
+    <parent link="Posture_control_joint_RF" />
+    <child link="Wheel_joint_RF" />
+    <axis xyz="0 0 1" />
+    <limit effort="10" velocity="5" />
+  </joint>
+  <joint name="Steering_joint_LB" type="revolute">
+    <origin xyz="-0.14809521 0.15 0.0090937195" rpy="0 0 1.5707963" />
+    <parent link="chassis" />
+    <child link="Steering_joint_LB" />
+    <axis xyz="0 0 1" />
+    <limit lower="0" upper="0.78" effort="10" velocity="5" />
+  </joint>
+  <joint name="Posture_control_joint_LB" type="continuous">
+    <origin xyz="0.060060967 0 -0.045" rpy="-1.5707963 0 1.5707963" />
+    <parent link="Steering_joint_LB" />
+    <child link="Posture_control_joint_LB" />
+    <axis xyz="0 0 1" />
+    <limit effort="10" velocity="5" />
+  </joint>
+  <joint name="Wheel_joint_LB" type="continuous">
+    <origin xyz="0.07494416 0.0028936022 -0.005" rpy="3.1415927 0 0" />
+    <parent link="Posture_control_joint_LB" />
+    <child link="Wheel_joint_LB" />
+    <axis xyz="0 0 1" />
+    <limit effort="10" velocity="5" />
+  </joint>
+  <joint name="Steering_joint_RB" type="revolute">
+    <origin xyz="-0.14809521 -0.15 0.0090937195" rpy="0 0 1.5707963" />
+    <parent link="chassis" />
+    <child link="Steering_joint_RB" />
+    <axis xyz="0 0 1" />
+    <limit lower="-0.76" upper="0" effort="10" velocity="5" />
+  </joint>
+  <joint name="Posture_control_joint_RB" type="continuous">
+    <origin xyz="-0.060060967 0 -0.045" rpy="1.5707963 0 1.5707963" />
+    <parent link="Steering_joint_RB" />
+    <child link="Posture_control_joint_RB" />
+    <axis xyz="0 0 1" />
+    <limit effort="10" velocity="5" />
+  </joint>
+  <joint name="Wheel_joint_RB" type="continuous">
+    <origin xyz="0.0070460026 0.074668292 -0.005" rpy="-3.1415927 0 0" />
+    <parent link="Posture_control_joint_RB" />
+    <child link="Wheel_joint_RB" />
+    <axis xyz="0 0 1" />
+    <limit effort="10" velocity="5" />
+  </joint>
+</robot>

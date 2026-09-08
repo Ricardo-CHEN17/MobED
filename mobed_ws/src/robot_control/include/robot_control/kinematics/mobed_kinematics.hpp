@@ -19,11 +19,15 @@ struct MobedParameters {
     double l_ecc = 0.075;    
     
     // Wheel parameters
-    double r_wheel = 0.15;   // wheel radius
+    double r_wheel = 0.10;   // wheel radius
+    
+    // CAD Mechanical Offsets
+    double posture_z_offset = 0.045; // Posture joint is 4.5cm lower than Steer joint
+
     
     // Limits
-    double max_height = 0.25;
-    double min_height = 0.05;
+    double max_height = 0.22;
+    double min_height = 0.08;
 };
 
 class MobedKinematics {

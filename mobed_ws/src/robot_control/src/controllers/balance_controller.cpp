@@ -27,9 +27,8 @@ Eigen::Vector4d BalanceController::update(
     }
 
     if (e_stop_active) {
-        // E-STOP: Freeze posture exactly where it currently is physically
-        prev_ecc_angles_ = current_ecc_angles;
-        return current_ecc_angles;
+        // E-STOP: Hold last target posture
+        return prev_ecc_angles_;
     }
 
     // 1. Safety Input Clamp (Prevent impossible target commands)
@@ -47,11 +46,10 @@ Eigen::Vector4d BalanceController::update(
         raw_ecc_angles(i) = std::clamp(raw_ecc_angles(i), params_.min_ecc_angle, params_.max_ecc_angle);
 
         // 4. Trajectory Smoothing (Low Pass Filter)
-        // This prevents the chassis from jerking violently when a new pose is commanded.
         double smoothed = params_.filter_alpha * raw_ecc_angles(i) + 
                           (1.0 - params_.filter_alpha) * prev_ecc_angles_(i);
                           
-        // Optional Rate Limiter check (ensure the smoothed target doesn't require exceeding max motor velocity)
+        // Rate Limiter
         double delta = smoothed - prev_ecc_angles_(i);
         double max_delta = params_.max_ecc_vel * dt;
         delta = std::clamp(delta, -max_delta, max_delta);

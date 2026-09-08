@@ -1,5 +1,4 @@
 #include "robot_control/kinematics/mobed_kinematics.hpp"
-#include <algorithm>
 
 namespace robot_control {
 namespace kinematics {
@@ -25,48 +24,41 @@ std::tuple<Eigen::Vector4d, Eigen::Vector4d> MobedKinematics::computeDrivingIK(
     const Eigen::Vector3d& v_body,
     const Eigen::Vector4d& current_steer_angles) const {
     
-    Eigen::Vector4d steer_angles;
-    Eigen::Vector4d wheel_speeds;
-    
     Eigen::Matrix<double, 4, 3> steer_pos = getSteerPositions();
-    
-    double vx = v_body(0);
-    double vy = v_body(1);
-    double wz = v_body(2);
-    
+    Eigen::Vector4d target_steer_angles;
+    Eigen::Vector4d target_wheel_speeds;
+
+    double vx = v_body.x();
+    double vy = v_body.y();
+    double wz = v_body.z();
+
     for (int i = 0; i < 4; ++i) {
-        double v_ix = vx - wz * steer_pos(i, 1);
-        double v_iy = vy + wz * steer_pos(i, 0);
+        double px = steer_pos(i, 0);
+        double py = steer_pos(i, 1);
+        
+        double v_ix = vx - wz * py;
+        double v_iy = vy + wz * px;
         
         double target_steer = std::atan2(v_iy, v_ix);
         double speed = std::sqrt(v_ix * v_ix + v_iy * v_iy) / params_.r_wheel;
         
-        // Anti-jitter: if speed is extremely low, keep previous steer angle
         if (std::abs(speed) < 1e-3) {
             target_steer = current_steer_angles(i);
             speed = 0.0;
-        } else {
-            // Swerve Heading Optimization: Shortest path and wheel reversal
-            double diff = normalize_angle(target_steer - current_steer_angles(i));
-            
-            if (diff > M_PI_2) {
-                target_steer -= M_PI;
-                speed = -speed;
-            } else if (diff < -M_PI_2) {
-                target_steer += M_PI;
-                speed = -speed;
-            }
-            
-            // Unwrap angle to prevent jumping between -pi and pi
-            diff = normalize_angle(target_steer - current_steer_angles(i));
-            target_steer = current_steer_angles(i) + diff;
         }
+
+        double diff = normalize_angle(target_steer - current_steer_angles(i));
         
-        steer_angles(i) = target_steer;
-        wheel_speeds(i) = speed;
+        if (std::abs(diff) > M_PI_2) {
+            target_steer = normalize_angle(target_steer + M_PI);
+            speed = -speed;
+        }
+
+        target_steer_angles(i) = target_steer;
+        target_wheel_speeds(i) = speed;
     }
-    
-    return {steer_angles, wheel_speeds};
+
+    return {target_steer_angles, target_wheel_speeds};
 }
 
 Eigen::Vector4d MobedKinematics::computePostureIK(
@@ -76,7 +68,7 @@ Eigen::Vector4d MobedKinematics::computePostureIK(
     const Eigen::Vector4d& current_steer_angles,
     bool outward_config) const {
     
-    Eigen::Vector4d ecc_angles;
+    Eigen::Vector4d target_ecc_angles;
     
     double safe_height = std::max(params_.min_height, std::min(target_height, params_.max_height));
     
@@ -85,48 +77,44 @@ Eigen::Vector4d MobedKinematics::computePostureIK(
     double cr = std::cos(target_roll);
     double sr = std::sin(target_roll);
     
-    // Row 3 of the Base to Terrain Rotation Matrix
     double r31 = -sp;
-    double r32 = cp * sr;
-    double r33 = cp * cr;
-    
-    Eigen::Matrix<double, 4, 3> steer_pos = getSteerPositions();
-    
+    double r32 = sr * cp;
+    double r33 = cr * cp;
+
     for (int i = 0; i < 4; ++i) {
-        double px = steer_pos(i, 0);
-        double py = steer_pos(i, 1);
+        double px = (i == FL || i == FR) ? params_.length_x : -params_.length_x;
+        double py = (i == FL || i == RL) ? params_.width_y : -params_.width_y;
+        
         double q_str = current_steer_angles(i);
         
-        // Formulation: A * sin(q_ecc) + B * cos(q_ecc) + C = 0
         double A = params_.l_ecc * (r31 * std::cos(q_str) + r32 * std::sin(q_str));
         double B = -params_.l_ecc * r33;
-        double C = safe_height + r31 * px + r32 * py - r33 * params_.r_wheel;
+        // Apply physical z_offset from CAD
+        double C = safe_height + r31 * px + r32 * py - r33 * params_.r_wheel - params_.posture_z_offset;
         
         double R = std::sqrt(A * A + B * B);
-        
-        // Solve: sin(q_ecc + alpha) = -C / R
         double sin_val = -C / R;
-        sin_val = std::max(-1.0, std::min(1.0, sin_val)); // Clamp for safety
+        sin_val = std::clamp(sin_val, -1.0, 1.0);
         
         double alpha = std::atan2(B, A);
         
-        // Two analytical solutions for the trigonometric equation
-        double q_ecc_1 = std::asin(sin_val) - alpha;
-        double q_ecc_2 = M_PI - std::asin(sin_val) - alpha;
+        double sol1 = std::asin(sin_val) - alpha;
+        double sol2 = M_PI - std::asin(sin_val) - alpha;
         
-        q_ecc_1 = normalize_angle(q_ecc_1);
-        q_ecc_2 = normalize_angle(q_ecc_2);
+        bool is_front = (i == FL || i == FR);
+        bool choose_forward = outward_config ? is_front : !is_front;
         
-        // The two solutions correspond to outward (q_ecc > 0) and inward (q_ecc < 0) configurations
-        // Pick the appropriate root based on the outward_config flag
-        if (outward_config) {
-            ecc_angles(i) = std::max(q_ecc_1, q_ecc_2); // Outward is the positive/larger root
+        double q_ecc;
+        if (std::sin(sol1) > std::sin(sol2)) {
+            q_ecc = choose_forward ? sol1 : sol2;
         } else {
-            ecc_angles(i) = std::min(q_ecc_1, q_ecc_2); // Inward is the negative/smaller root
+            q_ecc = choose_forward ? sol2 : sol1;
         }
+        
+        target_ecc_angles(i) = normalize_angle(q_ecc);
     }
     
-    return ecc_angles;
+    return target_ecc_angles;
 }
 
 } // namespace kinematics
