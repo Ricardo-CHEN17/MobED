@@ -14,7 +14,7 @@ struct BalanceControllerParams {
     double max_roll = 0.331;       // ~ 19 deg
     double max_pitch = 0.401;      // ~ 23 deg
     
-    double filter_alpha = 0.1;     // LPF coefficient (0.0 to 1.0, 1.0 means no filtering)
+    double filter_alpha = 0.3;     // LPF coefficient (0=frozen, 1=instant; 0.3 = ~10 cycles to converge)
     double max_ecc_vel = 2.0;      // rad/s
 };
 

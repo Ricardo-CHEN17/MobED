@@ -61,16 +61,27 @@ class UdpInterfaceNode(Node):
     # Downstream: ROS2 /mobed/joint_commands  -->  UDP JSON  -->  Mac
     # ------------------------------------------------------------------
     def _cmd_callback(self, msg: JointState):
-        """Convert JointState from control node into a flat 12-element command array."""
+        """Convert JointState from control node into a flat 12-element command array.
+
+        IMPORTANT: The control node publishes joints in interleaved order
+        (steer_LF, ecc_LF, wheel_LF, steer_RF, ...) but MuJoCo's data.ctrl
+        expects the canonical JOINT_NAMES order (all steers, all eccs, all wheels).
+        We MUST map by name, not by positional index.
+        """
         if len(msg.name) != 12:
             return
 
+        name_to_canonical_idx = {name: i for i, name in enumerate(JOINT_NAMES)}
         commands = [0.0] * 12
+
         for i, name in enumerate(msg.name):
+            canonical_idx = name_to_canonical_idx.get(name)
+            if canonical_idx is None:
+                continue
             if 'Wheel' in name:
-                commands[i] = msg.velocity[i]
+                commands[canonical_idx] = msg.velocity[i]
             else:
-                commands[i] = msg.position[i]
+                commands[canonical_idx] = msg.position[i]
 
         packet = json.dumps({'cmd': commands}).encode('utf-8')
         try:

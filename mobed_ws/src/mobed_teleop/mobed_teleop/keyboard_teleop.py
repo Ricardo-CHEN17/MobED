@@ -41,7 +41,7 @@ MAX_ROLL = 0.30         # rad (~17 deg)
 MAX_PITCH = 0.38        # rad (~22 deg)
 MIN_HEIGHT = 0.08       # m
 MAX_HEIGHT = 0.25       # m
-DEFAULT_HEIGHT = 0.15   # m
+DEFAULT_HEIGHT = 0.20   # m  (0.15 caused near-horizontal arms due to 4.5cm z_offset)
 
 PUBLISH_RATE = 50.0     # Hz
 DECAY_FACTOR = 0.85     # velocity decays each tick when no key held

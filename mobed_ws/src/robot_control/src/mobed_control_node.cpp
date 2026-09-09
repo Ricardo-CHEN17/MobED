@@ -71,10 +71,30 @@ private:
             else if (name == "Steering_joint_LB") curr_steer_angles_(2) = pos * steer_signs_[2];
             else if (name == "Steering_joint_RB") curr_steer_angles_(3) = pos * steer_signs_[3];
             
-            else if (name == "Posture_control_joint_LF") curr_ecc_angles_(0) = pos * ecc_signs_[0];
-            else if (name == "Posture_control_joint_RF") curr_ecc_angles_(1) = pos * ecc_signs_[1];
-            else if (name == "Posture_control_joint_LB") curr_ecc_angles_(2) = pos * ecc_signs_[2];
-            else if (name == "Posture_control_joint_RB") curr_ecc_angles_(3) = pos * ecc_signs_[3];
+            else if (name == "Posture_control_joint_LF") {
+                double q = (pos - ecc_offsets_[0]) * ecc_signs_[0];
+                while (q >  M_PI) q -= 2.0 * M_PI;
+                while (q <= -M_PI) q += 2.0 * M_PI;
+                curr_ecc_angles_(0) = q;
+            }
+            else if (name == "Posture_control_joint_RF") {
+                double q = (pos - ecc_offsets_[1]) * ecc_signs_[1];
+                while (q >  M_PI) q -= 2.0 * M_PI;
+                while (q <= -M_PI) q += 2.0 * M_PI;
+                curr_ecc_angles_(1) = q;
+            }
+            else if (name == "Posture_control_joint_LB") {
+                double q = (pos - ecc_offsets_[2]) * ecc_signs_[2];
+                while (q >  M_PI) q -= 2.0 * M_PI;
+                while (q <= -M_PI) q += 2.0 * M_PI;
+                curr_ecc_angles_(2) = q;
+            }
+            else if (name == "Posture_control_joint_RB") {
+                double q = (pos - ecc_offsets_[3]) * ecc_signs_[3];
+                while (q >  M_PI) q -= 2.0 * M_PI;
+                while (q <= -M_PI) q += 2.0 * M_PI;
+                curr_ecc_angles_(3) = q;
+            }
         }
     }
     
@@ -141,7 +161,7 @@ private:
     rclcpp::Time last_time_;
     
     Eigen::Vector3d cmd_vel_;
-    double target_height_ = 0.15; // default safe height
+    double target_height_ = 0.20; // default safe height (0.15 caused near-horizontal arms)
     double target_roll_ = 0.0;
     double target_pitch_ = 0.0;
     
