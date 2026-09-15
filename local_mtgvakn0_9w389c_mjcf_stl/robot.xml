@@ -30,7 +30,7 @@
 
       <geom name="chassis_mesh_1" type="mesh" mesh="part_001_solid_001" pos="0 0.0090937195 0.0019047852" euler="0 0 0" group="1" contype="0" conaffinity="0" />
       <body name="Steering_joint_LF" pos="0.15190479 0.15 0.0090937195" euler="0 0 1.5707963">
-        <joint name="Steering_joint_LF" type="hinge" pos="0 0 0" axis="0 0 1" range="-0.78 0" limited="true" actuatorfrcrange="-10 10" actuatorfrclimited="true" />
+        <joint name="Steering_joint_LF" type="hinge" pos="0 0 0" axis="0 0 1"  actuatorfrcrange="-10 10" actuatorfrclimited="true" />
         <inertial pos="0.0016718354 -2.1252266e-06 -0.028065513" mass="0.34155445" quat="0.9981442 4.7558172e-05 0.060894316 -0.00020962731" diaginertia="0.00021713852 0.00024338633 0.00028958694" />
         <geom name="Steering_joint_LF_mesh_1" type="mesh" mesh="part_002_solid_002" rgba="1 0.2 0.2 1"  pos="-0.14090628 0.15190479 -0.0071889343" euler="0 0 -1.5707963" group="1" contype="0" conaffinity="0" />
         <body name="Posture_control_joint_LF" pos="0.046069665 0 -0.045" euler="-1.5707963 -1.5707963 0">
@@ -45,7 +45,7 @@
         </body>
       </body>
       <body name="Steering_joint_RF" pos="0.15190479 -0.15 0.0090937195" euler="0 0 1.5707963">
-        <joint name="Steering_joint_RF" type="hinge" pos="0 0 0" axis="0 0 1" range="0 0.78" limited="true" actuatorfrcrange="-10 10" actuatorfrclimited="true" />
+        <joint name="Steering_joint_RF" type="hinge" pos="0 0 0" axis="0 0 1"  actuatorfrcrange="-10 10" actuatorfrclimited="true" />
         <inertial pos="-0.0016718342 2.12478e-06 -0.028065513" mass="0.34155445" quat="0.9981442 -4.7530235e-05 -0.060894308 -0.00020965858" diaginertia="0.00021713852 0.00024338633 0.00028958695" />
         <geom name="Steering_joint_RF_mesh_1" type="mesh" mesh="part_007_solid_007" rgba="0.2 1 0.2 1"  pos="0.15909372 0.15190479 -0.0071889343" euler="0 0 -1.5707963" group="1" contype="0" conaffinity="0" />
         <body name="Posture_control_joint_RF" pos="-0.060060967 0 -0.045" euler="1.5707963 1.5707963 0">
@@ -60,7 +60,7 @@
         </body>
       </body>
       <body name="Steering_joint_LB" pos="-0.14809521 0.15 0.0090937195" euler="0 0 1.5707963">
-        <joint name="Steering_joint_LB" type="hinge" pos="0 0 0" axis="0 0 1" range="0 0.78" limited="true" actuatorfrcrange="-10 10" actuatorfrclimited="true" />
+        <joint name="Steering_joint_LB" type="hinge" pos="0 0 0" axis="0 0 1"  actuatorfrcrange="-10 10" actuatorfrclimited="true" />
         <inertial pos="0.0016718342 -2.1248272e-06 -0.028065513" mass="0.34155446" quat="0.9981442 4.7518247e-05 0.060894305 -0.00020975219" diaginertia="0.00021713853 0.00024338634 0.00028958696" />
         <geom name="Steering_joint_LB_mesh_1" type="mesh" mesh="part_005_solid_005" pos="-0.14090628 -0.14809521 -0.0071889343" euler="0 0 -1.5707963" group="1" contype="0" conaffinity="0" />
         <body name="Posture_control_joint_LB" pos="0.060060967 0 -0.045" euler="-1.5707963 -1.5707963 0">
@@ -75,7 +75,7 @@
         </body>
       </body>
       <body name="Steering_joint_RB" pos="-0.14809521 -0.15 0.0090937195" euler="0 0 1.5707963">
-        <joint name="Steering_joint_RB" type="hinge" pos="0 0 0" axis="0 0 1" range="-0.76 0" limited="true" actuatorfrcrange="-10 10" actuatorfrclimited="true" />
+        <joint name="Steering_joint_RB" type="hinge" pos="0 0 0" axis="0 0 1"  actuatorfrcrange="-10 10" actuatorfrclimited="true" />
         <inertial pos="-0.0016718354 2.1246811e-06 -0.028065513" mass="0.34155445" quat="0.9981442 -4.756718e-05 -0.06089431 -0.00020963633" diaginertia="0.00021713853 0.00024338633 0.00028958695" />
         <geom name="Steering_joint_RB_mesh_1" type="mesh" mesh="part_006_solid_006" pos="0.15909372 -0.14809521 -0.0071889343" euler="0 0 -1.5707963" group="1" contype="0" conaffinity="0" />
         <body name="Posture_control_joint_RB" pos="-0.060060967 0 -0.045" euler="1.5707963 1.5707963 0">
@@ -95,17 +95,17 @@
     <key name="home" qpos="0 0 0.15 1 0 0 0 -0.0000 -1.9164 -3.5443 0.1599 -3.0159 1.8035 -0.0013 1.5080 4.1867 -0.0069 -3.0474 -0.7472" />
   </keyframe>
   <actuator>
-    <position name="act_steer_FL" joint="Steering_joint_LF" kp="800" kv="80" ctrllimited="true" ctrlrange="-3.14 3.14" />
-    <position name="act_steer_FR" joint="Steering_joint_RF" kp="800" kv="80" ctrllimited="true" ctrlrange="-3.14 3.14" />
-    <position name="act_steer_RL" joint="Steering_joint_LB" kp="800" kv="80" ctrllimited="true" ctrlrange="-3.14 3.14" />
-    <position name="act_steer_RR" joint="Steering_joint_RB" kp="800" kv="80" ctrllimited="true" ctrlrange="-3.14 3.14" />
-    <position name="act_ecc_FL" joint="Posture_control_joint_LF" kp="800" kv="80" ctrllimited="true" ctrlrange="-3.14 3.14" />
-    <position name="act_ecc_FR" joint="Posture_control_joint_RF" kp="800" kv="80" ctrllimited="true" ctrlrange="-3.14 3.14" />
-    <position name="act_ecc_RL" joint="Posture_control_joint_LB" kp="800" kv="80" ctrllimited="true" ctrlrange="-3.14 3.14" />
-    <position name="act_ecc_RR" joint="Posture_control_joint_RB" kp="800" kv="80" ctrllimited="true" ctrlrange="-3.14 3.14" />
-    <velocity name="act_wheel_FL" joint="Wheel_joint_LF" kv="50" ctrllimited="true" ctrlrange="-50 50" />
-    <velocity name="act_wheel_FR" joint="Wheel_joint_RF" kv="50" ctrllimited="true" ctrlrange="-50 50" />
-    <velocity name="act_wheel_RL" joint="Wheel_joint_LB" kv="50" ctrllimited="true" ctrlrange="-50 50" />
-    <velocity name="act_wheel_RR" joint="Wheel_joint_RB" kv="50" ctrllimited="true" ctrlrange="-50 50" />
+    <position name="act_steer_FL" joint="Steering_joint_LF" kp="150" kv="15" ctrllimited="true" ctrlrange="-3.14 3.14" />
+    <position name="act_steer_FR" joint="Steering_joint_RF" kp="150" kv="15" ctrllimited="true" ctrlrange="-3.14 3.14" />
+    <position name="act_steer_RL" joint="Steering_joint_LB" kp="150" kv="15" ctrllimited="true" ctrlrange="-3.14 3.14" />
+    <position name="act_steer_RR" joint="Steering_joint_RB" kp="150" kv="15" ctrllimited="true" ctrlrange="-3.14 3.14" />
+    <position name="act_ecc_FL" joint="Posture_control_joint_LF" kp="150" kv="15" ctrllimited="true" ctrlrange="-3.14 3.14" />
+    <position name="act_ecc_FR" joint="Posture_control_joint_RF" kp="150" kv="15" ctrllimited="true" ctrlrange="-3.14 3.14" />
+    <position name="act_ecc_RL" joint="Posture_control_joint_LB" kp="150" kv="15" ctrllimited="true" ctrlrange="-3.14 3.14" />
+    <position name="act_ecc_RR" joint="Posture_control_joint_RB" kp="150" kv="15" ctrllimited="true" ctrlrange="-3.14 3.14" />
+    <velocity name="act_wheel_FL" joint="Wheel_joint_LF" kv="10" ctrllimited="true" ctrlrange="-50 50" />
+    <velocity name="act_wheel_FR" joint="Wheel_joint_RF" kv="10" ctrllimited="true" ctrlrange="-50 50" />
+    <velocity name="act_wheel_RL" joint="Wheel_joint_LB" kv="10" ctrllimited="true" ctrlrange="-50 50" />
+    <velocity name="act_wheel_RR" joint="Wheel_joint_RB" kv="10" ctrllimited="true" ctrlrange="-50 50" />
   </actuator>
 </mujoco>
