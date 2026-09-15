@@ -36,10 +36,12 @@ std::tuple<Eigen::Vector4d, Eigen::Vector4d> DrivingController::update(
     const Eigen::Vector4d& current_steer_angles,
     const Eigen::Vector4d& current_ecc_angles,
     double dt,
-    bool e_stop_active) {
+    bool e_stop_active,
+    bool is_homing) {
 
     // First time initialization to current hardware state
     if (!initialized_) {
+        prev_steer_angles_ = current_steer_angles;
         
         prev_wheel_speeds_.setZero();
         initialized_ = true;
@@ -53,7 +55,16 @@ std::tuple<Eigen::Vector4d, Eigen::Vector4d> DrivingController::update(
     }
 
     // 1. Math Kinematics (Already contains Swerve Heading Optimization)
-    auto [raw_steer_angles, raw_wheel_speeds] = kinematics_->computeDrivingIK(cmd_vel, current_steer_angles);
+    Eigen::Vector4d raw_steer_angles;
+    Eigen::Vector4d raw_wheel_speeds;
+    if (is_homing) {
+        raw_steer_angles.setZero();
+        raw_wheel_speeds.setZero();
+    } else {
+        auto [s, w] = kinematics_->computeDrivingIK(cmd_vel, current_steer_angles);
+        raw_steer_angles = s;
+        raw_wheel_speeds = w;
+    }
 
     Eigen::Vector4d final_steer = prev_steer_angles_;
     Eigen::Vector4d final_speed = prev_wheel_speeds_;

@@ -20,15 +20,20 @@ Eigen::Vector4d BalanceController::update(
     double dt,
     bool e_stop_active) {
 
-    // First time initialization to current hardware state
-    if (!initialized_) {
+    if (e_stop_active) {
+        // E-STOP: Hold current physical state and reset initialization
+        // so it smoothly recovers via the cubic trajectory when released
+        initialized_ = false;
         prev_ecc_angles_ = current_ecc_angles;
-        initialized_ = true;
+        return current_ecc_angles;
     }
 
-    if (e_stop_active) {
-        // E-STOP: Hold last target posture
-        return prev_ecc_angles_;
+    // First time initialization to current hardware state
+    if (!initialized_) {
+        start_ecc_angles_ = current_ecc_angles;
+        prev_ecc_angles_ = current_ecc_angles;
+        time_since_init_ = 0.0;
+        initialized_ = true;
     }
 
     // 1. Safety Input Clamp (Prevent impossible target commands)
@@ -37,27 +42,42 @@ Eigen::Vector4d BalanceController::update(
 
     // 2. Math Kinematics (Exact non-linear projection)
     Eigen::Vector4d raw_ecc_angles = kinematics_->computePostureIK(
-        target_height, safe_roll, safe_pitch, current_steer_angles);
+        target_height, safe_roll, safe_pitch, current_steer_angles, false);
 
     Eigen::Vector4d final_ecc = prev_ecc_angles_;
 
     for (int i = 0; i < 4; ++i) {
         // 3. Mechanical Limit Clamp
         raw_ecc_angles(i) = std::clamp(raw_ecc_angles(i), params_.min_ecc_angle, params_.max_ecc_angle);
-
-        // 4. Trajectory Smoothing (Low Pass Filter)
-        double smoothed = params_.filter_alpha * raw_ecc_angles(i) + 
-                          (1.0 - params_.filter_alpha) * prev_ecc_angles_(i);
-                          
-        // Rate Limiter
-        double delta = smoothed - prev_ecc_angles_(i);
-        double max_delta = params_.max_ecc_vel * dt;
-        delta = std::clamp(delta, -max_delta, max_delta);
-        
-        final_ecc(i) = prev_ecc_angles_(i) + delta;
     }
 
-    // 5. Update state and return
+    // 4. Synchronized Smooth Startup Trajectory
+    if (time_since_init_ < STARTUP_DURATION) {
+        time_since_init_ += dt;
+        double progress = std::min(1.0, time_since_init_ / STARTUP_DURATION);
+        
+        // Cubic easing: 3p^2 - 2p^3 (Smooth start and stop)
+        double smooth_progress = progress * progress * (3.0 - 2.0 * progress);
+        
+        for (int i = 0; i < 4; ++i) {
+            final_ecc(i) = start_ecc_angles_(i) + (raw_ecc_angles(i) - start_ecc_angles_(i)) * smooth_progress;
+        }
+    } else {
+        // 5. Normal Trajectory Smoothing (Low Pass Filter) for teleop
+        for (int i = 0; i < 4; ++i) {
+            double smoothed = params_.filter_alpha * raw_ecc_angles(i) + 
+                              (1.0 - params_.filter_alpha) * prev_ecc_angles_(i);
+                              
+            // Rate Limiter
+            double delta = smoothed - prev_ecc_angles_(i);
+            double max_delta = params_.max_ecc_vel * dt;
+            delta = std::clamp(delta, -max_delta, max_delta);
+            
+            final_ecc(i) = prev_ecc_angles_(i) + delta;
+        }
+    }
+
+    // 6. Update state and return
     prev_ecc_angles_ = final_ecc;
 
     return final_ecc;

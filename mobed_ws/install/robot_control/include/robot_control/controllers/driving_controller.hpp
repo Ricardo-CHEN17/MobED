@@ -34,7 +34,10 @@ public:
         const Eigen::Vector4d& current_steer_angles,
         const Eigen::Vector4d& current_ecc_angles,
         double dt,
-        bool e_stop_active = false);
+        bool e_stop_active = false,
+        bool is_homing = false);
+
+    void reset() { initialized_ = false; }
 
 private:
     DrivingControllerParams params_;

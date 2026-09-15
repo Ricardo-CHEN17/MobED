@@ -14,7 +14,7 @@ struct BalanceControllerParams {
     double max_roll = 0.331;       // ~ 19 deg
     double max_pitch = 0.401;      // ~ 23 deg
     
-    double filter_alpha = 0.3;     // LPF coefficient (0=frozen, 1=instant; 0.3 = ~10 cycles to converge)
+    double filter_alpha = 0.02;     // LPF coefficient (0=frozen, 1=instant; 0.3 = ~10 cycles to converge)
     double max_ecc_vel = 2.0;      // rad/s
 };
 
@@ -44,12 +44,17 @@ public:
         double dt,
         bool e_stop_active = false);
 
+    void reset() { initialized_ = false; }
+
 private:
     BalanceControllerParams params_;
     std::shared_ptr<kinematics::MobedKinematics> kinematics_;
 
     Eigen::Vector4d prev_ecc_angles_;
+    Eigen::Vector4d start_ecc_angles_;
     bool initialized_ = false;
+    double time_since_init_ = 0.0;
+    const double STARTUP_DURATION = 3.0; // 3 seconds to smoothly stand up
 };
 
 } // namespace controllers

@@ -61,6 +61,23 @@ private:
     }
     
     void jointStateCallback(const sensor_msgs::msg::JointState::SharedPtr msg) {
+        // Detect Simulation Reset (If joint jumps by more than 0.5 rad instantly)
+        static bool first_msg = true;
+        if (!first_msg && msg->name.size() > 0) {
+            double current_pos = msg->position[0];
+            if (std::abs(current_pos - last_raw_joint_0_) > 0.5) {
+                RCLCPP_WARN(this->get_logger(), "Simulation Reset Detected! Re-initializing controllers.");
+                driving_controller_->reset();
+                balance_controller_->reset();
+                is_homing_ = true;
+                homing_timer_ = 0.0;
+            }
+            last_raw_joint_0_ = current_pos;
+        } else if (msg->name.size() > 0) {
+            last_raw_joint_0_ = msg->position[0];
+            first_msg = false;
+        }
+
         for (size_t i = 0; i < msg->name.size(); ++i) {
             const auto& name = msg->name[i];
             double pos = msg->position[i];
@@ -112,11 +129,24 @@ private:
         
         if (dt <= 0.0 || dt > 0.1) dt = 0.01;
         
+        if (is_homing_) {
+            homing_timer_ += dt;
+            if (homing_timer_ > HOMING_DURATION) {
+                is_homing_ = false;
+                RCLCPP_INFO(this->get_logger(), "Homing complete. Ready for teleop.");
+            }
+        }
+        
+        Eigen::Vector3d active_cmd_vel = is_homing_ ? Eigen::Vector3d::Zero() : cmd_vel_;
+        double active_height = is_homing_ ? 0.22 : target_height_;
+        double active_roll = is_homing_ ? 0.0 : target_roll_;
+        double active_pitch = is_homing_ ? 0.0 : target_pitch_;
+        
         auto [target_steer, target_wheel] = driving_controller_->update(
-            cmd_vel_, curr_steer_angles_, curr_ecc_angles_, dt, e_stop_active_);
+            active_cmd_vel, curr_steer_angles_, curr_ecc_angles_, dt, e_stop_active_, is_homing_);
             
         Eigen::Vector4d target_ecc = balance_controller_->update(
-            target_height_, target_roll_, target_pitch_, curr_steer_angles_, curr_ecc_angles_, dt, e_stop_active_);
+            active_height, active_roll, active_pitch, curr_steer_angles_, curr_ecc_angles_, dt, e_stop_active_);
             
         sensor_msgs::msg::JointState cmd_msg;
         cmd_msg.header.stamp = now;
@@ -161,7 +191,7 @@ private:
     rclcpp::Time last_time_;
     
     Eigen::Vector3d cmd_vel_;
-    double target_height_ = 0.20; // default safe height (0.15 caused near-horizontal arms)
+    double target_height_ = 0.22; // default maximum height for vertical legs
     double target_roll_ = 0.0;
     double target_pitch_ = 0.0;
     
@@ -169,6 +199,10 @@ private:
     Eigen::Vector4d curr_ecc_angles_;
     
     bool e_stop_active_ = false;
+    double last_raw_joint_0_ = 0.0;
+    bool is_homing_ = true;
+    double homing_timer_ = 0.0;
+    const double HOMING_DURATION = 3.0;
     
     // Polarity Mapping Arrays
     std::vector<double> steer_signs_;
