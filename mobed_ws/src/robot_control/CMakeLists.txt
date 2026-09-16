@@ -24,6 +24,17 @@ target_include_directories(mobed_kinematics PUBLIC
 )
 target_include_directories(mobed_kinematics SYSTEM PUBLIC ${EIGEN3_INCLUDE_DIRS})
 
+# Estimation Library (EKF State Estimator + Terrain Estimator)
+add_library(mobed_estimation SHARED
+  src/estimation/state_estimator.cpp
+  src/estimation/terrain_estimator.cpp
+)
+target_include_directories(mobed_estimation PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+target_include_directories(mobed_estimation SYSTEM PUBLIC ${EIGEN3_INCLUDE_DIRS})
+
 # Controller Classes Library
 add_library(mobed_controllers SHARED
   src/controllers/driving_controller.cpp
@@ -53,6 +64,7 @@ endif()
 # INSTALL TARGETS (FIXED)
 install(TARGETS
   mobed_kinematics
+  mobed_estimation
   mobed_controllers
   mobed_control_node
   ARCHIVE DESTINATION lib
@@ -66,7 +78,7 @@ install(DIRECTORY include/
 )
 
 ament_export_include_directories(include)
-ament_export_libraries(mobed_kinematics mobed_controllers)
+ament_export_libraries(mobed_kinematics mobed_estimation mobed_controllers)
 ament_export_dependencies(Eigen3 rclcpp sensor_msgs std_msgs robot_interfaces)
 
 ament_package()
