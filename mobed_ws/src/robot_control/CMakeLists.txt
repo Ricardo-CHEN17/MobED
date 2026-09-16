@@ -35,6 +35,17 @@ target_include_directories(mobed_estimation PUBLIC
 )
 target_include_directories(mobed_estimation SYSTEM PUBLIC ${EIGEN3_INCLUDE_DIRS})
 
+# Dynamics Library (SRBD Model + GRF Optimizer + QP Solver)
+add_library(mobed_dynamics SHARED
+  src/dynamics/srbd_model.cpp
+  src/dynamics/grf_optimizer.cpp
+)
+target_include_directories(mobed_dynamics PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+target_include_directories(mobed_dynamics SYSTEM PUBLIC ${EIGEN3_INCLUDE_DIRS})
+
 # Controller Classes Library
 add_library(mobed_controllers SHARED
   src/controllers/driving_controller.cpp
@@ -65,6 +76,7 @@ endif()
 install(TARGETS
   mobed_kinematics
   mobed_estimation
+  mobed_dynamics
   mobed_controllers
   mobed_control_node
   ARCHIVE DESTINATION lib
@@ -78,7 +90,7 @@ install(DIRECTORY include/
 )
 
 ament_export_include_directories(include)
-ament_export_libraries(mobed_kinematics mobed_estimation mobed_controllers)
+ament_export_libraries(mobed_kinematics mobed_estimation mobed_dynamics mobed_controllers)
 ament_export_dependencies(Eigen3 rclcpp sensor_msgs std_msgs robot_interfaces)
 
 ament_package()
