@@ -24,10 +24,11 @@ target_include_directories(mobed_kinematics PUBLIC
 )
 target_include_directories(mobed_kinematics SYSTEM PUBLIC ${EIGEN3_INCLUDE_DIRS})
 
-# Estimation Library (EKF State Estimator + Terrain Estimator)
+# Estimation Library (EKF State Estimator + Terrain Estimator + Contact Detector)
 add_library(mobed_estimation SHARED
   src/estimation/state_estimator.cpp
   src/estimation/terrain_estimator.cpp
+  src/estimation/contact_detector.cpp
 )
 target_include_directories(mobed_estimation PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -46,6 +47,18 @@ target_include_directories(mobed_dynamics PUBLIC
 )
 target_include_directories(mobed_dynamics SYSTEM PUBLIC ${EIGEN3_INCLUDE_DIRS})
 
+# Tasks Library (FSM Climbing + Trajectory Generator)
+add_library(mobed_tasks SHARED
+  src/tasks/trajectory_generator.cpp
+  src/tasks/task_controller.cpp
+)
+target_include_directories(mobed_tasks PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+target_include_directories(mobed_tasks SYSTEM PUBLIC ${EIGEN3_INCLUDE_DIRS})
+target_link_libraries(mobed_tasks PUBLIC mobed_estimation)
+
 # Controller Classes Library
 add_library(mobed_controllers SHARED
   src/controllers/driving_controller.cpp
@@ -56,13 +69,18 @@ target_include_directories(mobed_controllers PUBLIC
   $<INSTALL_INTERFACE:include>
 )
 target_include_directories(mobed_controllers SYSTEM PUBLIC ${EIGEN3_INCLUDE_DIRS})
-target_link_libraries(mobed_controllers PUBLIC mobed_kinematics)
+target_link_libraries(mobed_controllers PUBLIC mobed_kinematics mobed_dynamics)
 
 # ROS2 Node Executable
 add_executable(mobed_control_node src/mobed_control_node.cpp)
 target_include_directories(mobed_control_node PRIVATE include)
 target_include_directories(mobed_control_node SYSTEM PRIVATE ${EIGEN3_INCLUDE_DIRS})
-target_link_libraries(mobed_control_node mobed_controllers)
+target_link_libraries(mobed_control_node
+  mobed_controllers
+  mobed_estimation
+  mobed_dynamics
+  mobed_tasks
+)
 ament_target_dependencies(mobed_control_node rclcpp sensor_msgs std_msgs robot_interfaces)
 
 if(BUILD_TESTING)
@@ -77,6 +95,7 @@ install(TARGETS
   mobed_kinematics
   mobed_estimation
   mobed_dynamics
+  mobed_tasks
   mobed_controllers
   mobed_control_node
   ARCHIVE DESTINATION lib
@@ -90,7 +109,7 @@ install(DIRECTORY include/
 )
 
 ament_export_include_directories(include)
-ament_export_libraries(mobed_kinematics mobed_estimation mobed_dynamics mobed_controllers)
+ament_export_libraries(mobed_kinematics mobed_estimation mobed_dynamics mobed_tasks mobed_controllers)
 ament_export_dependencies(Eigen3 rclcpp sensor_msgs std_msgs robot_interfaces)
 
 ament_package()

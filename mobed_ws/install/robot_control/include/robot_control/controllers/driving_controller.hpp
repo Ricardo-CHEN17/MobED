@@ -4,6 +4,7 @@
 #include <tuple>
 #include <memory>
 #include "robot_control/kinematics/mobed_kinematics.hpp"
+#include "robot_control/core/robot_params.hpp"
 
 namespace robot_control {
 namespace controllers {
@@ -11,22 +12,35 @@ namespace controllers {
 struct DrivingControllerParams {
     double max_wheel_accel = 10.0; // rad/s^2
     double max_steer_vel = 5.0;    // rad/s
-    double ecc_collision_threshold = 0.5; // radians (approx 28 degrees) - within this angle, wheel tucked inward
+
+    // ---- Steering Constraint (geometric anti-collision) ----
+    // Minimum clearance angle between steering direction and eccentric arm
+    // to prevent the wheel from hitting the chassis
+    double steer_ecc_clearance = 0.35;  // rad (~20 deg)
+
+    // ---- Bank Angle Calculator (Eq 8 in paper) ----
+    // Maximum allowable bank angle (roll induced by centripetal force)
+    double max_bank_angle = 0.26;  // rad (~15 deg)
+    // Height of center of gravity above ground (used for bank angle calc)
+    double cog_height = 0.18;     // m, approximate CoG height
+    // Low-pass filter coefficient for smoothing bank angle transitions
+    double bank_angle_filter = 0.05;  // 0=frozen, 1=instant
 };
 
 class DrivingController {
 public:
-    DrivingController(const DrivingControllerParams& params, 
+    DrivingController(const DrivingControllerParams& params,
                       std::shared_ptr<kinematics::MobedKinematics> kinematics);
 
     /**
      * @brief Update the driving controller step
-     * 
+     *
      * @param cmd_vel Target body velocity [vx, vy, omega_z]
      * @param current_steer_angles Feedback from hardware [FL, FR, RL, RR]
      * @param current_ecc_angles Feedback from hardware for collision check [FL, FR, RL, RR]
      * @param dt Time step since last call
      * @param e_stop_active Emergency stop flag
+     * @param is_homing Whether the robot is in homing mode
      * @return std::tuple<Eigen::Vector4d, Eigen::Vector4d> (target_steer_angles, target_wheel_speeds)
      */
     std::tuple<Eigen::Vector4d, Eigen::Vector4d> update(
@@ -37,7 +51,18 @@ public:
         bool e_stop_active = false,
         bool is_homing = false);
 
-    void reset() { initialized_ = false; }
+    /**
+     * @brief Get the bank angle (roll) induced by centripetal force during turning.
+     *
+     * Computes the optimal chassis roll angle to counteract centripetal force
+     * during curved motion, similar to a motorcycle leaning into a turn.
+     * (Paper Eq 8)
+     *
+     * @return double  Desired bank roll angle (rad), positive = lean right
+     */
+    double getBankAngle() const { return filtered_bank_angle_; }
+
+    void reset() { initialized_ = false; filtered_bank_angle_ = 0.0; }
 
 private:
     DrivingControllerParams params_;
@@ -45,12 +70,38 @@ private:
 
     Eigen::Vector4d prev_steer_angles_;
     Eigen::Vector4d prev_wheel_speeds_;
-    
-    bool initialized_ = false;
 
-    // Helper for collision checking
-    bool isSteerSafe(double target_steer, double current_ecc) const;
+    bool initialized_ = false;
+    double filtered_bank_angle_ = 0.0;  // smoothed bank angle output
+
+    /**
+     * @brief Check if a steering angle is safe given the current eccentric angle.
+     *
+     * Implements precise geometric collision avoidance: computes the angular
+     * clearance between the wheel's steering direction and the eccentric arm
+     * projection, and rejects moves that would cause the wheel to collide
+     * with the chassis body.
+     *
+     * @param leg_index      Which leg (FL, FR, RL, RR)
+     * @param target_steer   Desired steering angle (rad)
+     * @param current_ecc    Current eccentric joint angle (rad)
+     * @return true if the steering move is safe
+     */
+    bool isSteerSafe(int leg_index, double target_steer, double current_ecc) const;
+
+    /**
+     * @brief Compute the raw bank angle from current motion state.
+     *
+     * Uses the centripetal force formula (Paper Eq 8):
+     *   tan(bank_angle) = v^2 / (R * g) = v * omega / g
+     *
+     * where v = linear speed, omega = yaw rate, g = gravity.
+     *
+     * @param cmd_vel  Current velocity command [vx, vy, omega_z]
+     * @return double  Raw bank angle (rad)
+     */
+    double computeBankAngle(const Eigen::Vector3d& cmd_vel) const;
 };
 
-} // namespace controllers
-} // namespace robot_control
+}  // namespace controllers
+}  // namespace robot_control
