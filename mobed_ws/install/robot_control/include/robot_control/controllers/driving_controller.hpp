@@ -14,6 +14,9 @@ struct DrivingControllerParams {
     double max_steer_vel = 5.0;    // rad/s
 
     // ---- Steering Constraint (geometric anti-collision) ----
+    // Eccentric arm angle beyond which it is considered tucked inwards
+    double ecc_collision_threshold = 0.5; // rad
+    
     // Minimum clearance angle between steering direction and eccentric arm
     // to prevent the wheel from hitting the chassis
     double steer_ecc_clearance = 0.35;  // rad (~20 deg)

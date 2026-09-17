@@ -49,7 +49,7 @@ Eigen::Vector4d BalanceController::update(
 
     // 2. Math Kinematics (Exact non-linear projection)
     Eigen::Vector4d raw_ecc_angles = kinematics_->computePostureIK(
-        target_height, safe_roll, safe_pitch, current_steer_angles, false);
+        target_height, safe_roll, safe_pitch, current_steer_angles, true);
 
     Eigen::Vector4d final_ecc = prev_ecc_angles_;
 
@@ -208,7 +208,7 @@ ControlOutput BalanceController::updateHybrid(
     double safe_pitch = std::clamp(target_pitch, -params_.max_pitch, params_.max_pitch);
 
     Eigen::Vector4d ik_target = kinematics_->computePostureIK(
-        target_height, safe_roll, safe_pitch, current_steer_angles, false);
+        target_height, safe_roll, safe_pitch, current_steer_angles, true);
 
     for (int i = 0; i < 4; ++i) {
         ik_target(i) = std::clamp(ik_target(i), params_.min_ecc_angle, params_.max_ecc_angle);

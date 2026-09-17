@@ -144,25 +144,9 @@ private:
     // Callback: Joint States → Positions + Efforts parsing
     // ================================================================
     void jointStateCallback(const sensor_msgs::msg::JointState::SharedPtr msg) {
-        // Detect Simulation Reset
-        static bool first_msg = true;
-        if (!first_msg && msg->name.size() > 0) {
-            double current_pos = msg->position[0];
-            if (std::abs(current_pos - last_raw_joint_0_) > 0.5) {
-                RCLCPP_WARN(this->get_logger(), "Simulation Reset Detected! Re-initializing all modules.");
-                driving_controller_->reset();
-                balance_controller_->reset();
-                state_estimator_->reset();
-                terrain_estimator_->reset();
-                contact_detector_->reset();
-                task_controller_->reset();
-                is_homing_ = true;
-                homing_timer_ = 0.0;
-            }
-            last_raw_joint_0_ = current_pos;
-        } else if (msg->name.size() > 0) {
+        // Skip brittle single-joint reset detection since steering wraps around naturally
+        if (msg->name.size() > 0) {
             last_raw_joint_0_ = msg->position[0];
-            first_msg = false;
         }
 
         bool has_effort = !msg->effort.empty();
@@ -308,7 +292,7 @@ private:
 
         Eigen::Vector4d target_ecc = balance_controller_->update(
             active_height, active_roll, active_pitch,
-            curr_steer_angles_, curr_ecc_angles_, dt, e_stop_active_);
+            target_steer, curr_ecc_angles_, dt, e_stop_active_);
 
         // ============================================================
         // Phase 7: FSM Override — replace specific legs if climbing

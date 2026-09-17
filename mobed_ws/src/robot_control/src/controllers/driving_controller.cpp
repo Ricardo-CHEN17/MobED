@@ -57,43 +57,13 @@ double DrivingController::computeBankAngle(const Eigen::Vector3d& cmd_vel) const
 }
 
 bool DrivingController::isSteerSafe(int leg_index, double target_steer, double current_ecc) const {
-    // ================================================================
-    // Geometric Steering Constraint Function
-    //
-    // The eccentric arm projects the wheel radially outward from the
-    // steering axis. If the steering direction aligns too closely with
-    // the eccentric arm direction, the wheel or tire could collide with
-    // the chassis body or neighboring components.
-    //
-    // We compute the angular difference between the steering direction
-    // and the eccentric arm projection angle, and require a minimum
-    // clearance angle.
-    //
-    // For front legs (FL, FR): the arm swings in the XZ plane of the
-    //   steering frame. Collision risk is highest when the arm points
-    //   inward (toward chassis center) and the wheel steers inward too.
-    //
-    // For rear legs (RL, RR): same logic, mirrored.
-    // ================================================================
+    (void)leg_index;
+    (void)target_steer;
+    (void)current_ecc;
 
-    (void)leg_index;  // reserved for per-leg asymmetric constraints
-
-    // Eccentric arm projection angle onto the ground plane
-    // When ecc_angle is 0, the arm points straight down.
-    // The arm's ground-plane projection direction is approximately ecc_angle
-    // relative to the steering axis forward direction.
-    double ecc_projection = current_ecc;
-
-    // Angular difference between steer direction and arm projection
-    double diff = target_steer - ecc_projection;
-    // Normalize to [-pi, pi]
-    diff = std::atan2(std::sin(diff), std::cos(diff));
-
-    // If the wheel is steering too close to the arm direction, block it
-    if (std::abs(diff) < params_.steer_ecc_clearance) {
-        return false;
-    }
-
+    // Disabled geometric constraint: previous logic was flawed as it compared 
+    // the steering yaw angle directly with the eccentric pitch angle.
+    // For now, always allow steering to prevent wheel lockups.
     return true;
 }
 
@@ -135,7 +105,9 @@ std::tuple<Eigen::Vector4d, Eigen::Vector4d> DrivingController::update(
         raw_steer_angles.setZero();
         raw_wheel_speeds.setZero();
     } else {
-        auto [s, w] = kinematics_->computeDrivingIK(cmd_vel, current_steer_angles);
+        // Use prev_steer_angles_ (last commanded) instead of current_steer_angles (physical)
+        // This prevents a positive feedback loop with the PD controller noise when stationary.
+        auto [s, w] = kinematics_->computeDrivingIK(cmd_vel, prev_steer_angles_);
         raw_steer_angles = s;
         raw_wheel_speeds = w;
     }
