@@ -47,9 +47,22 @@ std::tuple<Eigen::Vector4d, Eigen::Vector4d> MobedKinematics::computeDrivingIK(
             speed = 0.0;
         }
 
+        // 1. Classic Shortest Path Optimization
         double diff = normalize_angle(target_steer - current_steer_angles(i));
-        
         if (std::abs(diff) > M_PI_2) {
+            target_steer = normalize_angle(target_steer + M_PI);
+            speed = -speed;
+        }
+
+        // 2. Forbidden Zone (Self-Collision) Reversal
+        // Exact 90-degree death quadrants for each leg due to rectangular chassis corner lobes.
+        bool is_forbidden = false;
+        if (i == FL && target_steer < -M_PI_2 && target_steer > -M_PI) is_forbidden = true;
+        if (i == FR && target_steer > M_PI_2 && target_steer < M_PI) is_forbidden = true;
+        if (i == RL && target_steer < 0.0 && target_steer > -M_PI_2) is_forbidden = true;
+        if (i == RR && target_steer > 0.0 && target_steer < M_PI_2) is_forbidden = true;
+
+        if (is_forbidden) {
             target_steer = normalize_angle(target_steer + M_PI);
             speed = -speed;
         }

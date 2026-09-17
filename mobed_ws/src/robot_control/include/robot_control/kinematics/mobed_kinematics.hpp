@@ -70,6 +70,11 @@ public:
      */
     Eigen::Matrix<double, 4, 3> getSteerPositions() const;
 
+    /**
+     * @brief Get the robot parameters
+     */
+    const MobedParameters& getParams() const { return params_; }
+
 private:
     MobedParameters params_;
     

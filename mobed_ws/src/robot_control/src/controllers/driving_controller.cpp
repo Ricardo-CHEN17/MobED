@@ -57,13 +57,35 @@ double DrivingController::computeBankAngle(const Eigen::Vector3d& cmd_vel) const
 }
 
 bool DrivingController::isSteerSafe(int leg_index, double target_steer, double current_ecc) const {
-    (void)leg_index;
-    (void)target_steer;
-    (void)current_ecc;
+    auto kParams = kinematics_->getParams();
+    double px = (leg_index == 0 || leg_index == 1) ? kParams.length_x : -kParams.length_x;
+    double py = (leg_index == 0 || leg_index == 2) ? kParams.width_y : -kParams.width_y;
 
-    // Disabled geometric constraint: previous logic was flawed as it compared 
-    // the steering yaw angle directly with the eccentric pitch angle.
-    // For now, always allow steering to prevent wheel lockups.
+    // 2. Compute footprint offset based on eccentric arm pitch
+    // In MobED kinematics, positive current_ecc swings outward along the steering direction.
+    // The offset magnitude in the XY plane is l_ecc * sin(current_ecc).
+    // Note: We use params_.l_ecc, but since it's not strictly in DrivingControllerParams, 
+    // we hardcode the 0.15m length for the collision check.
+    double l_ecc = 0.15; 
+    double D_xy = l_ecc * std::sin(current_ecc);
+
+    // 3. Compute absolute wheel ground contact position
+    double wheel_X = px + D_xy * std::cos(target_steer);
+    double wheel_Y = py + D_xy * std::sin(target_steer);
+
+    // 4. Safe bounding box check
+    // Chassis geometry is roughly length_x and width_y
+    // We add a safety margin (e.g. 0.9 multiplier to strictly keep it out of the box center)
+    double safe_x = kParams.length_x * 0.9;
+    double safe_y = kParams.width_y * 0.9;
+
+    bool is_inside = (std::abs(wheel_X) < safe_x) && (std::abs(wheel_Y) < safe_y);
+
+    // Return false (not safe) if the wheel is inside the chassis footprint
+    if (is_inside) {
+        return false;
+    }
+
     return true;
 }
 
