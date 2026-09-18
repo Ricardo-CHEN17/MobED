@@ -53,6 +53,7 @@ public:
         curr_ecc_angles_.setZero();
         curr_ecc_efforts_.setZero();
         curr_wheel_efforts_.setZero();
+        curr_wheel_velocities_.setZero();
         cmd_vel_.setZero();
 
         // Polarity Mapping Setup (FL, FR, RL, RR)
@@ -150,11 +151,13 @@ private:
         }
 
         bool has_effort = !msg->effort.empty();
+        bool has_vel = !msg->velocity.empty();
 
         for (size_t i = 0; i < msg->name.size(); ++i) {
             const auto& name = msg->name[i];
             double pos = msg->position[i];
             double effort = has_effort ? msg->effort[i] : 0.0;
+            double vel = has_vel ? msg->velocity[i] : 0.0;
 
             // ---- Steering joints: position ----
             if (name == "Steering_joint_LF") curr_steer_angles_(0) = pos * steer_signs_[0];
@@ -192,11 +195,23 @@ private:
                 curr_ecc_efforts_(3) = effort;
             }
 
-            // ---- Wheel joints: effort ----
-            else if (name == "Wheel_joint_LF") curr_wheel_efforts_(0) = effort;
-            else if (name == "Wheel_joint_RF") curr_wheel_efforts_(1) = effort;
-            else if (name == "Wheel_joint_LB") curr_wheel_efforts_(2) = effort;
-            else if (name == "Wheel_joint_RB") curr_wheel_efforts_(3) = effort;
+            // ---- Wheel joints: velocity + effort ----
+            else if (name == "Wheel_joint_LF") {
+                curr_wheel_velocities_(0) = vel * wheel_signs_[0];
+                curr_wheel_efforts_(0) = effort;
+            }
+            else if (name == "Wheel_joint_RF") {
+                curr_wheel_velocities_(1) = vel * wheel_signs_[1];
+                curr_wheel_efforts_(1) = effort;
+            }
+            else if (name == "Wheel_joint_LB") {
+                curr_wheel_velocities_(2) = vel * wheel_signs_[2];
+                curr_wheel_efforts_(2) = effort;
+            }
+            else if (name == "Wheel_joint_RB") {
+                curr_wheel_velocities_(3) = vel * wheel_signs_[3];
+                curr_wheel_efforts_(3) = effort;
+            }
         }
     }
 
@@ -212,17 +227,17 @@ private:
     }
 
     // ================================================================
-    // Main Control Loop (100 Hz)
+    // Main Control Loop Callback
     // ================================================================
     void timerCallback() {
         auto now = this->now();
         double dt = (now - last_time_).seconds();
         last_time_ = now;
 
-        if (dt <= 0.0 || dt > 0.1) dt = 0.01;
+        if (dt <= 0.0 || dt > 0.5) return;
 
         // ============================================================
-        // Phase 1: Homing management
+        // Phase 1: Homing Initialization
         // ============================================================
         if (is_homing_) {
             homing_timer_ += dt;
@@ -238,8 +253,8 @@ private:
         if (imu_received_) {
             state_estimator_->predict(latest_imu_, dt);
         }
-        // Odometry correction using wheel velocities (simplified: use cmd_vel as proxy)
-        state_estimator_->correctWithOdometry(cmd_vel_);
+        // Odometry correction using 4 wheel velocities
+        state_estimator_->correctWithOdometry(curr_wheel_velocities_, curr_steer_angles_, curr_ecc_angles_);
 
         BodyState body_state = state_estimator_->getState();
         (void)body_state;  // Suppress unused warning (will be used when hybrid mode is active)
@@ -290,9 +305,11 @@ private:
         // Overlay bank angle from driving controller onto target roll
         active_roll += driving_controller_->getBankAngle();
 
+        Eigen::Matrix3d R_T = terrain_estimator_->getState().rotation;
+
         Eigen::Vector4d target_ecc = balance_controller_->update(
             active_height, active_roll, active_pitch,
-            target_steer, curr_ecc_angles_, dt, e_stop_active_);
+            target_steer, curr_ecc_angles_, R_T, dt, e_stop_active_);
 
         // ============================================================
         // Phase 7: FSM Override — replace specific legs if climbing
@@ -383,6 +400,7 @@ private:
     Eigen::Vector4d curr_ecc_angles_;
     Eigen::Vector4d curr_ecc_efforts_;
     Eigen::Vector4d curr_wheel_efforts_;
+    Eigen::Vector4d curr_wheel_velocities_;
 
     ImuData latest_imu_;
     bool imu_received_ = false;

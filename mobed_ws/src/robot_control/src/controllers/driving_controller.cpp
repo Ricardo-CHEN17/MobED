@@ -15,40 +15,21 @@ DrivingController::DrivingController(const DrivingControllerParams& params,
 double DrivingController::computeBankAngle(const Eigen::Vector3d& cmd_vel) const {
     // ================================================================
     // Bank Angle Calculator (Paper Eq 8)
-    //
-    // During curved motion, centripetal acceleration creates a lateral
-    // force on the chassis. To prevent tipping, the chassis leans inward
-    // (like a motorcycle cornering).
-    //
-    // Physics:
-    //   a_centripetal = v * omega_z
-    //   tan(bank_angle) = a_centripetal / g = v * omega_z / g
-    //
-    // For omnidirectional motion, use the total translational speed:
-    //   v = sqrt(vx^2 + vy^2)
-    //
-    // The sign of the bank angle follows the yaw rate:
-    //   positive omega_z (CCW turn) -> lean left (negative roll)
-    //   negative omega_z (CW turn)  -> lean right (positive roll)
     // ================================================================
 
     double vx = cmd_vel(0);
     double vy = cmd_vel(1);
     double wz = cmd_vel(2);
 
-    double v = std::sqrt(vx * vx + vy * vy);
+    // Centrifugal acceleration x-component (alpha_{c,x})
+    // alpha_c = - omega x v
+    // omega = (0, 0, wz), v = (vx, vy, 0)
+    // omega x v = (-wz * vy, wz * vx, 0)
+    // alpha_c = (wz * vy, -wz * vx, 0)
+    double alpha_cx = wz * vy;
 
-    // No bank needed for very low speed or no rotation
-    if (v < 0.05 || std::abs(wz) < 0.01) {
-        return 0.0;
-    }
-
-    // Centripetal acceleration
-    double a_cent = v * wz;
-
-    // Bank angle: atan(a_cent / g)
-    // Negative sign: CCW turn (wz > 0) should produce a lean into the turn
-    double bank = std::atan2(-a_cent, 9.81);
+    // Bank angle: atan(alpha_cx / g)
+    double bank = std::atan2(alpha_cx, 9.81);
 
     // Clamp to maximum allowable bank
     bank = std::clamp(bank, -params_.max_bank_angle, params_.max_bank_angle);
@@ -56,37 +37,60 @@ double DrivingController::computeBankAngle(const Eigen::Vector3d& cmd_vel) const
     return bank;
 }
 
-bool DrivingController::isSteerSafe(int leg_index, double target_steer, double current_ecc) const {
+double DrivingController::clampSteerSafe(int leg_index, double target_steer, double current_ecc) const {
+    // If the eccentric arm is nearly vertical, collision is impossible
+    if (std::abs(current_ecc) < params_.ecc_collision_threshold) {
+        return target_steer;
+    }
+
     auto kParams = kinematics_->getParams();
     double px = (leg_index == 0 || leg_index == 1) ? kParams.length_x : -kParams.length_x;
     double py = (leg_index == 0 || leg_index == 2) ? kParams.width_y : -kParams.width_y;
 
-    // 2. Compute footprint offset based on eccentric arm pitch
-    // In MobED kinematics, positive current_ecc swings outward along the steering direction.
-    // The offset magnitude in the XY plane is l_ecc * sin(current_ecc).
-    // Note: We use params_.l_ecc, but since it's not strictly in DrivingControllerParams, 
-    // we hardcode the 0.15m length for the collision check.
-    double l_ecc = 0.15; 
+    double l_ecc = kParams.l_ecc; 
     double D_xy = l_ecc * std::sin(current_ecc);
 
-    // 3. Compute absolute wheel ground contact position
-    double wheel_X = px + D_xy * std::cos(target_steer);
-    double wheel_Y = py + D_xy * std::sin(target_steer);
-
-    // 4. Safe bounding box check
-    // Chassis geometry is roughly length_x and width_y
-    // We add a safety margin (e.g. 0.9 multiplier to strictly keep it out of the box center)
-    double safe_x = kParams.length_x * 0.9;
-    double safe_y = kParams.width_y * 0.9;
-
-    bool is_inside = (std::abs(wheel_X) < safe_x) && (std::abs(wheel_Y) < safe_y);
-
-    // Return false (not safe) if the wheel is inside the chassis footprint
-    if (is_inside) {
-        return false;
+    // The forbidden direction is the direction from the corner (px, py) towards the chassis center (0,0).
+    // Center is at (-px, -py) relative to the corner.
+    double center_angle = std::atan2(-py, -px);
+    
+    // The actual direction the wheel extends from the corner is target_steer if D_xy > 0, 
+    // or target_steer + PI if D_xy < 0.
+    double extension_angle = target_steer;
+    if (D_xy < 0) {
+        extension_angle = target_steer + M_PI;
     }
-
-    return true;
+    
+    // Normalize extension_angle to [-PI, PI]
+    while (extension_angle > M_PI) extension_angle -= 2.0 * M_PI;
+    while (extension_angle <= -M_PI) extension_angle += 2.0 * M_PI;
+    
+    // The forbidden zone for the extension angle is [center_angle - clearance, center_angle + clearance]
+    double diff = extension_angle - center_angle;
+    while (diff > M_PI) diff -= 2.0 * M_PI;
+    while (diff <= -M_PI) diff += 2.0 * M_PI;
+    
+    if (std::abs(diff) < params_.steer_ecc_clearance) {
+        // It's inside the forbidden zone! Clamp it to the nearest edge.
+        if (diff >= 0) {
+            extension_angle = center_angle + params_.steer_ecc_clearance;
+        } else {
+            extension_angle = center_angle - params_.steer_ecc_clearance;
+        }
+        
+        // Recover target_steer
+        double clamped_steer = extension_angle;
+        if (D_xy < 0) {
+            clamped_steer -= M_PI;
+        }
+        
+        while (clamped_steer > M_PI) clamped_steer -= 2.0 * M_PI;
+        while (clamped_steer <= -M_PI) clamped_steer += 2.0 * M_PI;
+        
+        return clamped_steer;
+    }
+    
+    return target_steer;
 }
 
 std::tuple<Eigen::Vector4d, Eigen::Vector4d> DrivingController::update(
@@ -141,11 +145,7 @@ std::tuple<Eigen::Vector4d, Eigen::Vector4d> DrivingController::update(
         // ============================================================
         // 3. Steering Constraint Function (geometric anti-collision)
         // ============================================================
-        if (!isSteerSafe(i, raw_steer_angles(i), current_ecc_angles(i))) {
-            // Collision zone! Kill speed, hold steering.
-            raw_wheel_speeds(i) = 0.0;
-            raw_steer_angles(i) = prev_steer_angles_(i);
-        }
+        raw_steer_angles(i) = clampSteerSafe(i, raw_steer_angles(i), current_ecc_angles(i));
 
         // ============================================================
         // 4. Slew Rate Limiting (Speed/Accel)

@@ -24,6 +24,7 @@ Eigen::Vector4d BalanceController::update(
     double target_pitch,
     const Eigen::Vector4d& current_steer_angles,
     const Eigen::Vector4d& current_ecc_angles,
+    const Eigen::Matrix3d& R_T,
     double dt,
     bool e_stop_active) {
 
@@ -49,7 +50,7 @@ Eigen::Vector4d BalanceController::update(
 
     // 2. Math Kinematics (Exact non-linear projection)
     Eigen::Vector4d raw_ecc_angles = kinematics_->computePostureIK(
-        target_height, safe_roll, safe_pitch, current_steer_angles, true);
+        target_height, safe_roll, safe_pitch, current_steer_angles, R_T);
 
     Eigen::Vector4d final_ecc = prev_ecc_angles_;
 
@@ -97,44 +98,32 @@ void BalanceController::computeGainSchedule(
     double current_height, double& w_grf, double& w_ik) const
 {
     // ================================================================
-    // The paper uses a height-dependent blending:
+    // Gain Scheduling (Paper Eq 16-17)
     //
-    // At maximum height (legs nearly vertical):
-    //   - The eccentric arm Jacobian J_z approaches zero (singularity)
-    //   - GRF-to-torque mapping is unreliable
-    //   - -> IK position control dominates (w_ik → 1, w_grf → 0)
-    //
-    // At lower heights (legs angled):
-    //   - Jacobian has good condition number
-    //   - Dynamics-based GRF provides superior balance
-    //   - -> GRF torque control dominates (w_grf → 1, w_ik → 0)
-    //
-    // height_ratio ∈ [0, 1]: 0 = min_height, 1 = max_height
+    // w_grf = sqrt(|h_max - h_cmd| / (h_max - h_mid))     (16)
+    // w_ik = (1 + Kh * max(0, h_cmd - h_mid) / (h_max - h_mid)) * (1 + m_payload / m_body)    (17)
     // ================================================================
 
-    double min_h = 0.08;  // min operational height
-    double max_h = 0.22;  // max operational height
+    // Eq 16-17 requires RobotParams
+    RobotParams rp;
+    double h_max = rp.max_height;
+    double h_mid = 0.5 * (rp.min_height + rp.max_height);
+    double h_cmd = std::clamp(current_height, rp.min_height, h_max);
 
-    double height_ratio = (current_height - min_h) / (max_h - min_h);
-    height_ratio = std::clamp(height_ratio, 0.0, 1.0);
+    // To prevent division by zero, ensure h_max - h_mid > 0
+    double den = std::max(1e-6, h_max - h_mid);
 
-    // Smooth transition using cosine blending
-    // At height_ratio = 0 (low): w_grf = 1.0, w_ik = 0.0
-    // At height_ratio = 1 (max): w_grf = 0.0, w_ik = 1.0
-    double blend = 0.5 * (1.0 - std::cos(M_PI * height_ratio));
+    // Eq 16
+    w_grf = std::sqrt(std::abs(h_max - h_cmd) / den);
 
-    w_ik  = blend * params_.gain_ik_scale;
-    w_grf = (1.0 - blend) * params_.gain_grf_scale;
+    // Eq 17
+    double Kh = 7.0; // from paper
+    double mass_ratio = 1.0 + (rp.payload_mass / rp.body_mass);
+    w_ik = (1.0 + Kh * std::max(0.0, h_cmd - h_mid) / den) * mass_ratio;
 
-    // Normalize so weights sum to 1
-    double total = w_grf + w_ik;
-    if (total > 1e-6) {
-        w_grf /= total;
-        w_ik  /= total;
-    } else {
-        w_grf = 0.0;
-        w_ik  = 1.0;
-    }
+    // The paper does not explicitly normalize, but they act as weights.
+    // In Eq 9: tau = w_grf * tau_grf + w_ik * tau_ik.
+    // So we apply them as scales directly. No normalization here.
 }
 
 // ============================================================================
@@ -187,6 +176,7 @@ ControlOutput BalanceController::updateHybrid(
     const BodyState& body_state,
     const std::array<Eigen::Vector3d, NUM_LEGS>& contact_points,
     const std::array<bool, NUM_LEGS>& contact_valid,
+    const Eigen::Matrix3d& R_T,
     double dt,
     bool e_stop_active)
 {
@@ -208,7 +198,7 @@ ControlOutput BalanceController::updateHybrid(
     double safe_pitch = std::clamp(target_pitch, -params_.max_pitch, params_.max_pitch);
 
     Eigen::Vector4d ik_target = kinematics_->computePostureIK(
-        target_height, safe_roll, safe_pitch, current_steer_angles, true);
+        target_height, safe_roll, safe_pitch, current_steer_angles, R_T);
 
     for (int i = 0; i < 4; ++i) {
         ik_target(i) = std::clamp(ik_target(i), params_.min_ecc_angle, params_.max_ecc_angle);

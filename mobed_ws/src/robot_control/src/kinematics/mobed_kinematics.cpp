@@ -55,12 +55,20 @@ std::tuple<Eigen::Vector4d, Eigen::Vector4d> MobedKinematics::computeDrivingIK(
         }
 
         // 2. Forbidden Zone (Self-Collision) Reversal
-        // Exact 90-degree death quadrants for each leg due to rectangular chassis corner lobes.
+        double margin = 5.0 * M_PI / 180.0;
         bool is_forbidden = false;
-        if (i == FL && target_steer < -M_PI_2 && target_steer > -M_PI) is_forbidden = true;
-        if (i == FR && target_steer > M_PI_2 && target_steer < M_PI) is_forbidden = true;
-        if (i == RL && target_steer < 0.0 && target_steer > -M_PI_2) is_forbidden = true;
-        if (i == RR && target_steer > 0.0 && target_steer < M_PI_2) is_forbidden = true;
+        
+        // FL: [-180, -85] 
+        if (i == FL && target_steer < (-M_PI_2 + margin) && target_steer > -M_PI) is_forbidden = true;
+        
+        // FR: [85, 180] 
+        if (i == FR && target_steer > (M_PI_2 - margin) && target_steer < M_PI) is_forbidden = true;
+        
+        // RL: [-95, 0] (as requested)
+        if (i == RL && target_steer < 0.0 && target_steer > (-M_PI_2 - margin)) is_forbidden = true;
+        
+        // RR: [0, 95] (symmetric to RL)
+        if (i == RR && target_steer > 0.0 && target_steer < (M_PI_2 + margin)) is_forbidden = true;
 
         if (is_forbidden) {
             target_steer = normalize_angle(target_steer + M_PI);
@@ -79,20 +87,25 @@ Eigen::Vector4d MobedKinematics::computePostureIK(
     double target_roll, 
     double target_pitch,
     const Eigen::Vector4d& current_steer_angles,
+    const Eigen::Matrix3d& R_T,
     bool outward_config) const {
     
     Eigen::Vector4d target_ecc_angles;
     
     double safe_height = std::max(params_.min_height, std::min(target_height, params_.max_height));
     
-    double cp = std::cos(target_pitch);
-    double sp = std::sin(target_pitch);
-    double cr = std::cos(target_roll);
-    double sr = std::sin(target_roll);
+    // R_B: Rotation from Base to World
+    Eigen::Matrix3d R_B;
+    R_B = Eigen::AngleAxisd(target_roll, Eigen::Vector3d::UnitX())
+        * Eigen::AngleAxisd(target_pitch, Eigen::Vector3d::UnitY());
+        
+    // R_TB: Rotation from Base to Terrain (R_TB = R_T^T * R_B)
+    Eigen::Matrix3d R_TB = R_T.transpose() * R_B;
     
-    double r31 = -sp;
-    double r32 = sr * cp;
-    double r33 = cr * cp;
+    // We need the 3rd row of R_TB for the Z_terrain equation
+    double rtb_31 = R_TB(2, 0);
+    double rtb_32 = R_TB(2, 1);
+    double rtb_33 = R_TB(2, 2);
 
     for (int i = 0; i < 4; ++i) {
         double px = (i == FL || i == FR) ? params_.length_x : -params_.length_x;
@@ -100,10 +113,12 @@ Eigen::Vector4d MobedKinematics::computePostureIK(
         
         double q_str = current_steer_angles(i);
         
-        double A = params_.l_ecc * (r31 * std::cos(q_str) + r32 * std::sin(q_str));
-        double B = -params_.l_ecc * r33;
-        // Apply physical z_offset from CAD
-        double C = safe_height + r31 * px + r32 * py - r33 * params_.r_wheel - params_.posture_z_offset;
+        double A = params_.l_ecc * (rtb_31 * std::cos(q_str) + rtb_32 * std::sin(q_str));
+        double B = -params_.l_ecc * rtb_33;
+        
+        // C = target_height + (R_TB * r_BOC)_z (with ecc angle parts separated into A and B)
+        // Corrected physical z_offset from CAD multiplied by rtb_33
+        double C = safe_height + rtb_31 * px + rtb_32 * py - rtb_33 * params_.r_wheel - rtb_33 * params_.posture_z_offset;
         
         double R = std::sqrt(A * A + B * B);
         double sin_val = -C / R;
@@ -111,17 +126,27 @@ Eigen::Vector4d MobedKinematics::computePostureIK(
         
         double alpha = std::atan2(B, A);
         
-        double sol1 = std::asin(sin_val) - alpha;
-        double sol2 = M_PI - std::asin(sin_val) - alpha;
+        double sol1 = normalize_angle(std::asin(sin_val) - alpha);
+        double sol2 = normalize_angle(M_PI - std::asin(sin_val) - alpha);
         
+        // Strict sign selection as per paper: 
+        // "Using the FR wheel as a reference, if the wheel is positioned outside the body, 
+        // the solution q_ecc,+ (where q_ecc^d > 0) is selected."
+        // Outside body means extending outward.
+        // For front wheels, outward means q > 0. For rear wheels, outward means q < 0.
         bool is_front = (i == FL || i == FR);
-        bool choose_forward = outward_config ? is_front : !is_front;
+        bool target_positive = outward_config ? is_front : !is_front;
         
         double q_ecc;
-        if (std::sin(sol1) > std::sin(sol2)) {
-            q_ecc = choose_forward ? sol1 : sol2;
+        if (target_positive) {
+            // We want the solution that is > 0 (or closest to it)
+            q_ecc = (sol1 >= -1e-3) ? sol1 : sol2;
+            // If both are negative somehow, we just pick the maximum one
+            if (sol1 < 0 && sol2 < 0) q_ecc = std::max(sol1, sol2);
         } else {
-            q_ecc = choose_forward ? sol2 : sol1;
+            // We want the solution that is < 0 (or closest to it)
+            q_ecc = (sol1 <= 1e-3) ? sol1 : sol2;
+            if (sol1 > 0 && sol2 > 0) q_ecc = std::min(sol1, sol2);
         }
         
         target_ecc_angles(i) = normalize_angle(q_ecc);

@@ -12,6 +12,8 @@ struct RobotParams {
     // Mass & Inertia (for future SRBD / QP in Plan 2)
     // -----------------------------------------------
     double total_mass = 70.0;  // kg, total robot mass including payload
+    double body_mass = 14.0;   // kg, base body mass without payload/wheels
+    double payload_mass = 56.0; // kg, payload mass
     // Body inertia tensor about CoM, in body frame (kg·m²)
     // Approximate values — must be refined from CAD or system identification
     Eigen::Matrix3d inertia = (Eigen::Matrix3d() <<

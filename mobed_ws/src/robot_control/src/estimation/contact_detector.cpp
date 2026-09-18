@@ -89,25 +89,21 @@ void ContactDetector::update(
             wheel_effort_history_[i], wheel_efforts(i), dt);
 
         // ============================================================
-        // 2. Impact detection: dual-criteria check
+        // 2. Impact detection: rate-only check
         //
-        // An impact is flagged if EITHER condition is met:
-        //   (a) Absolute torque exceeds threshold (sustained contact)
-        //   (b) Torque rate exceeds threshold (sudden collision)
+        // An impact is flagged if the torque rate (dτ/dt) exceeds threshold.
+        // The paper states impacts are detected based on the rate of change
+        // of torque, not absolute torque.
         //
         // We check both eccentric and wheel joints, since the impact
         // signature appears on both depending on the collision geometry.
         // ============================================================
 
-        bool abs_trigger_ecc   = std::abs(ecc_efforts(i))   > params_.contact_torque_threshold;
-        bool abs_trigger_wheel = std::abs(wheel_efforts(i)) > params_.contact_torque_threshold;
-
         bool rate_trigger_ecc   = std::abs(ecc_torque_rates_(i))   > params_.contact_torque_rate_threshold;
         bool rate_trigger_wheel = std::abs(wheel_torque_rates_(i)) > params_.contact_torque_rate_threshold;
 
-        // Impact = (absolute OR rate) on (ecc OR wheel)
-        impact_flags_[i] = (abs_trigger_ecc || rate_trigger_ecc ||
-                            abs_trigger_wheel || rate_trigger_wheel);
+        // Impact = rate on (ecc OR wheel)
+        impact_flags_[i] = (rate_trigger_ecc || rate_trigger_wheel);
     }
 
     // Store for next cycle

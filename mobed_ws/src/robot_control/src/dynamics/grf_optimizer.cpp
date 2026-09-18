@@ -13,7 +13,7 @@ GrfOptimizer::GrfOptimizer(const RobotParams& params)
 Eigen::Vector4d GrfOptimizer::computeOptimalGRF(
     const SrbdModel& srbd,
     const Eigen::Vector3d& desired_linear_accel,
-    const Eigen::Vector3d& desired_angular_accel) const
+    const Eigen::Vector3d& desired_angular_accel)
 {
     Eigen::Vector4d grf_result = Eigen::Vector4d::Zero();
 
@@ -32,27 +32,25 @@ Eigen::Vector4d GrfOptimizer::computeOptimalGRF(
     srbd.buildDynamicsConstraints(desired_linear_accel, desired_angular_accel,
                                   A_dyn, b_dyn);
 
+    // Extract f_prev for the active contact legs
+    Eigen::VectorXd f_prev(n_contact);
+    for (int i = 0; i < n_contact; ++i) {
+        f_prev(i) = prev_grf_result_(contact_indices[i]);
+    }
+
     // ================================================================
     // Build QP cost function (Eq 13 in the paper)
     //
-    //   min  0.5 * f^T * H * f + g^T * f
+    //   min  || A_dyn * f - b_dyn ||_Q^2 + || f - f_prev ||_R^2
     //
-    // where H = 2 * (W + alpha * I)
-    //       g = -2 * W * f_ref
-    //
-    //   W = diag(w_1, ..., w_n) weighting matrix (uniform for now)
-    //   f_ref = (m * g_accel) / n_contact  (equal distribution reference)
-    //   alpha = regularization weight
+    // This is equivalent to min 0.5 * f^T * H * f + g^T * f
+    // where H = 2 * (Q * A_dyn^T * A_dyn + R * I)
+    //       g = 2 * (-Q * A_dyn^T * b_dyn - R * f_prev)
     // ================================================================
-
-    double f_ref = params_.total_mass * params_.gravity / n_contact;
-
-    // Cost matrix H: penalize deviation from f_ref + regularization
-    Eigen::MatrixXd H = Eigen::MatrixXd::Identity(n_contact, n_contact);
-    H *= 2.0 * (1.0 + regularization_weight);
-
-    // Linear cost: g = -2 * f_ref * ones
-    Eigen::VectorXd f_cost = -2.0 * f_ref * Eigen::VectorXd::Ones(n_contact);
+    Eigen::MatrixXd H = 2.0 * (weight_Q * A_dyn.transpose() * A_dyn + 
+                               weight_R * Eigen::MatrixXd::Identity(n_contact, n_contact));
+    
+    Eigen::VectorXd f_cost = 2.0 * (-weight_Q * A_dyn.transpose() * b_dyn - weight_R * f_prev);
 
     // ================================================================
     // Assemble QP problem
@@ -62,8 +60,10 @@ Eigen::Vector4d GrfOptimizer::computeOptimalGRF(
     qp.f  = f_cost;
     qp.lb = Eigen::VectorXd::Zero(n_contact);                           // f_z >= 0 (no pull)
     qp.ub = Eigen::VectorXd::Constant(n_contact, max_grf_per_leg);      // f_z <= f_max
-    qp.A_eq = A_dyn;
-    qp.b_eq = b_dyn;
+    
+    // Dynamics are now soft constraints in the cost function
+    qp.A_eq = Eigen::MatrixXd(0, n_contact);
+    qp.b_eq = Eigen::VectorXd(0);
 
     // ================================================================
     // Solve QP
@@ -84,6 +84,7 @@ Eigen::Vector4d GrfOptimizer::computeOptimalGRF(
         }
     }
 
+    prev_grf_result_ = grf_result;
     return grf_result;
 }
 

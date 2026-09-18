@@ -43,11 +43,15 @@ public:
      *
      * Corrects the predicted state using the velocity estimate derived from
      * wheel encoder readings and the current steering/eccentric angles
-     * (forward kinematics).
+     * (forward kinematics) according to Eq 3 in the paper.
      *
-     * @param wheel_velocity  Chassis velocity computed from wheel odometry [vx, vy, wz] in body frame
+     * @param wheel_velocities  Chassis wheel velocities [FL, FR, RL, RR] (rad/s)
+     * @param steer_angles      Current steering angles [FL, FR, RL, RR] (rad)
+     * @param ecc_angles        Current eccentric angles [FL, FR, RL, RR] (rad)
      */
-    void correctWithOdometry(const Eigen::Vector3d& wheel_velocity);
+    void correctWithOdometry(const Eigen::Vector4d& wheel_velocities,
+                             const Eigen::Vector4d& steer_angles,
+                             const Eigen::Vector4d& ecc_angles);
 
     /**
      * @brief Get the current estimated body state.

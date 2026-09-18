@@ -78,19 +78,18 @@ private:
     double filtered_bank_angle_ = 0.0;  // smoothed bank angle output
 
     /**
-     * @brief Check if a steering angle is safe given the current eccentric angle.
+     * @brief Constrain the steering angle to prevent the wheel from hitting the chassis.
      *
-     * Implements precise geometric collision avoidance: computes the angular
-     * clearance between the wheel's steering direction and the eccentric arm
-     * projection, and rejects moves that would cause the wheel to collide
-     * with the chassis body.
+     * Implements precise geometric collision avoidance (Steer Constraint Function).
+     * If the eccentric arm is extended, it clamps the steer angle to keep the
+     * wheel outside the chassis footprint.
      *
      * @param leg_index      Which leg (FL, FR, RL, RR)
      * @param target_steer   Desired steering angle (rad)
      * @param current_ecc    Current eccentric joint angle (rad)
-     * @return true if the steering move is safe
+     * @return double        Clamped safe steering angle (rad)
      */
-    bool isSteerSafe(int leg_index, double target_steer, double current_ecc) const;
+    double clampSteerSafe(int leg_index, double target_steer, double current_ecc) const;
 
     /**
      * @brief Compute the raw bank angle from current motion state.

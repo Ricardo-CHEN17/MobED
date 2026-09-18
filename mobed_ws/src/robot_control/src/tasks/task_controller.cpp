@@ -252,9 +252,12 @@ void TaskController::update(
         }
 
         // ============================================================
-        // REAR_PLACED: All wheels on top, settle and return to IDLE
+        // REAR_PLACED: All wheels on top, move forward a certain distance (Step 6)
         // ============================================================
         case ClimbState::REAR_PLACED: {
+            // Command forward motion to advance the body fully onto the obstacle
+            forward_vel_override_ = params_.forward_drive_speed;
+
             if (state_timer_ >= params_.settling_duration) {
                 transitionTo(ClimbState::IDLE);
             }

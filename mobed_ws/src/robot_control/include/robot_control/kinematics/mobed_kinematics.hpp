@@ -61,6 +61,7 @@ public:
         double target_roll, 
         double target_pitch,
         const Eigen::Vector4d& current_steer_angles,
+        const Eigen::Matrix3d& R_T,
         bool outward_config = true) const;
 
     /**

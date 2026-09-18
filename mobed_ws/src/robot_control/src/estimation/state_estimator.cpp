@@ -88,33 +88,62 @@ void StateEstimator::predict(const ImuData& imu, double dt) {
     P_ = F * P_ * F.transpose() + Q_ * dt;
 }
 
-void StateEstimator::correctWithOdometry(const Eigen::Vector3d& wheel_velocity) {
+void StateEstimator::correctWithOdometry(const Eigen::Vector4d& wheel_velocities,
+                                         const Eigen::Vector4d& steer_angles,
+                                         const Eigen::Vector4d& ecc_angles) {
     if (!initialized_) return;
 
     // ================================================================
-    // Measurement model:
-    //   z = [vx_odom, vy_odom, wz_odom]  (body frame)
-    //
-    // We compare this against our predicted body-frame velocity.
-    // The observation matrix H maps state → measurement:
-    //   H * x ≈ R^T * v_world  (rows 3-5 of state, rotated to body frame)
+    // Eq 3 from paper: v_body = 1/4 * sum( - [omega_body]x B_r_i - B_r_dot_i )
+    // Since contact point velocity in world p_dot_C = 0,
+    // B_r_dot_i is the contact point velocity relative to the base frame.
+    // The wheel rolls forward, so the contact point moves backward relative to the base:
+    // B_r_dot_i = - v_wheel * [cos(q_steer), sin(q_steer), 0]^T
+    // where v_wheel = wheel_velocity_rad_s * r_wheel.
     // ================================================================
 
     Eigen::Matrix3d R = orientation_.toRotationMatrix();
+    // In our simplified EKF, we don't have angular velocity in the state,
+    // so we assume it is zero or could use gyro. For now we just use 0.
+    Eigen::Vector3d omega_body = Eigen::Vector3d::Zero();
+
+    Eigen::Vector3d v_body_meas = Eigen::Vector3d::Zero();
+
+    for (int i = 0; i < 4; ++i) {
+        double px = (i == 0 || i == 1) ? params_.length_x : -params_.length_x;
+        double py = (i == 0 || i == 2) ? params_.width_y : -params_.width_y;
+        double q_str = steer_angles(i);
+        double q_ecc = ecc_angles(i);
+        double v_wheel = wheel_velocities(i) * params_.r_wheel;
+
+        // Contact position in base frame B_r_i
+        Eigen::Vector3d B_r_i(
+            px + params_.l_ecc * std::cos(q_str) * std::sin(q_ecc),
+            py + params_.l_ecc * std::sin(q_str) * std::sin(q_ecc),
+            -params_.posture_z_offset - params_.l_ecc * std::cos(q_ecc) - params_.r_wheel
+        );
+
+        // Contact velocity relative to base frame B_r_dot_i
+        Eigen::Vector3d B_r_dot_i(
+            -v_wheel * std::cos(q_str),
+            -v_wheel * std::sin(q_str),
+            0.0
+        );
+
+        v_body_meas += (-omega_body.cross(B_r_i) - B_r_dot_i);
+    }
+    v_body_meas /= 4.0;
 
     // Predicted body-frame velocity from state
     Eigen::Vector3d v_world_pred = x_.segment<3>(3);
     Eigen::Vector3d v_body_pred = R.transpose() * v_world_pred;
 
     // Innovation (measurement residual): body-frame linear velocity only
-    // wheel_velocity(2) is omega_z, which we compare against gyro-integrated value
     Eigen::Vector3d z_pred(v_body_pred.x(), v_body_pred.y(), 0.0);
-    Eigen::Vector3d z_meas(wheel_velocity.x(), wheel_velocity.y(), 0.0);
+    Eigen::Vector3d z_meas(v_body_meas.x(), v_body_meas.y(), 0.0);
     Eigen::Vector3d innovation = z_meas - z_pred;
 
     // Observation Jacobian H (3x9):
-    // Maps [pos(3), vel(3), orient_err(3)] → [vx_body, vy_body, 0]
-    // dz/dvel = R^T (3x3), other partials are zero for this simplified model
     Eigen::Matrix<double, 3, STATE_DIM> H;
     H.setZero();
     H.block<3,3>(0, 3) = R.transpose();  // ∂(v_body)/∂(v_world) = R^T

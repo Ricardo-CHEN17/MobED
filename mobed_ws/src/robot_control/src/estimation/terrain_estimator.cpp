@@ -63,36 +63,30 @@ Eigen::Vector3d TerrainEstimator::fitPlaneNormal(
     const std::vector<Eigen::Vector3d>& points) const
 {
     // ================================================================
-    // SVD-based plane fitting (Eq 4-6 in the paper)
-    //
-    // 1. Compute centroid of contact points
-    // 2. Center the points by subtracting the centroid
-    // 3. Form the data matrix A (N x 3)
-    // 4. Compute SVD: A = U * S * V^T
-    // 5. The plane normal is the column of V corresponding to the
-    //    smallest singular value (last column of V)
+    // Plane fitting using pseudo-inverse (Eq 4-6 in the paper)
+    // a = W^+ p^z
+    // W = [1 p^x p^y]_{Nx3}
     // ================================================================
 
     size_t n = points.size();
 
-    // Step 1: Compute centroid
-    Eigen::Vector3d centroid = Eigen::Vector3d::Zero();
-    for (const auto& p : points) {
-        centroid += p;
-    }
-    centroid /= static_cast<double>(n);
+    Eigen::MatrixXd W(n, 3);
+    Eigen::VectorXd pz(n);
 
-    // Step 2-3: Build centered data matrix
-    Eigen::MatrixXd A(n, 3);
     for (size_t i = 0; i < n; ++i) {
-        A.row(i) = (points[i] - centroid).transpose();
+        W(i, 0) = 1.0;
+        W(i, 1) = points[i].x();
+        W(i, 2) = points[i].y();
+        pz(i) = points[i].z();
     }
 
-    // Step 4: SVD decomposition
-    Eigen::JacobiSVD<Eigen::MatrixXd> svd(A, Eigen::ComputeFullV);
+    // Solve for a = [a0, a1, a2]^T using least squares (pseudo-inverse equivalent)
+    Eigen::Vector3d a = W.colPivHouseholderQr().solve(pz);
 
-    // Step 5: Normal = last column of V (smallest singular value direction)
-    Eigen::Vector3d normal = svd.matrixV().col(2);
+    // The plane equation is z = a0 + a1*x + a2*y
+    // Thus, -a1*x - a2*y + z - a0 = 0
+    // Normal vector is proportional to (-a1, -a2, 1)
+    Eigen::Vector3d normal(-a(1), -a(2), 1.0);
 
     return normal.normalized();
 }
