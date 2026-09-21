@@ -39,19 +39,21 @@ public:
     void predict(const ImuData& imu, double dt);
 
     /**
-     * @brief Run one EKF correction step using wheel odometry.
+     * @brief Run one EKF correction step using wheel odometry (Eq 3 in paper).
      *
-     * Corrects the predicted state using the velocity estimate derived from
-     * wheel encoder readings and the current steering/eccentric angles
-     * (forward kinematics) according to Eq 3 in the paper.
-     *
-     * @param wheel_velocities  Chassis wheel velocities [FL, FR, RL, RR] (rad/s)
-     * @param steer_angles      Current steering angles [FL, FR, RL, RR] (rad)
-     * @param ecc_angles        Current eccentric angles [FL, FR, RL, RR] (rad)
+     * @param wheel_velocities Chassis wheel velocities [FL, FR, RL, RR] (rad/s)
+     * @param steer_angles     Current steering angles [FL, FR, RL, RR] (rad)
+     * @param ecc_angles       Current eccentric angles [FL, FR, RL, RR] (rad)
+     * @param steer_vels       Current steering joint velocities [FL, FR, RL, RR] (rad/s)
+     * @param ecc_vels         Current eccentric joint velocities [FL, FR, RL, RR] (rad/s)
+     * @param omega_body       Current body angular velocity measured by gyroscope (rad/s)
      */
     void correctWithOdometry(const Eigen::Vector4d& wheel_velocities,
                              const Eigen::Vector4d& steer_angles,
-                             const Eigen::Vector4d& ecc_angles);
+                             const Eigen::Vector4d& ecc_angles,
+                             const Eigen::Vector4d& steer_vels,
+                             const Eigen::Vector4d& ecc_vels,
+                             const Eigen::Vector3d& omega_body);
 
     /**
      * @brief Get the current estimated body state.
@@ -85,6 +87,7 @@ private:
 
     // ---- Orientation tracking (quaternion, maintained separately) ----
     Eigen::Quaterniond orientation_;
+    Eigen::Vector3d latest_omega_body_ = Eigen::Vector3d::Zero();
 
     /**
      * @brief Build the state transition Jacobian F for the prediction step.

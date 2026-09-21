@@ -132,6 +132,13 @@ public:
     double getForwardVelocityOverride() const { return forward_vel_override_; }
 
     /**
+     * @brief Get contact validity flags for each leg based on FSM state.
+     * Airborne legs during FRONT_LIFT or REAR_LIFT report false.
+     * @return Array of 4 booleans [FL, FR, RL, RR]
+     */
+    std::array<bool, NUM_LEGS> getContactValid() const;
+
+    /**
      * @brief Force abort the climbing task and return to IDLE.
      */
     void abort();
@@ -160,8 +167,10 @@ private:
     double state_timer_ = 0.0;        // time spent in current state
     double contact_debounce_ = 0.0;   // debounce timer for contact detection
 
-    // Stored start angles for trajectory planning
+    // Stored start angles for trajectory planning and placed angles
     Eigen::Vector4d lift_start_angles_;
+    Eigen::Vector2d front_target_angles_ = Eigen::Vector2d::Zero();
+    Eigen::Vector2d rear_target_angles_ = Eigen::Vector2d::Zero();
 
     /**
      * @brief Transition to a new state, resetting the state timer.

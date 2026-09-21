@@ -43,6 +43,10 @@ struct BalanceControllerParams {
     double kd_roll   = 20.0;   // Nm·s/rad
     double kp_pitch  = 100.0;  // Nm/rad
     double kd_pitch  = 20.0;   // Nm·s/rad
+
+    // ---- IK position PD gains for tau_ik in Eq 9 ----
+    double kp_ik = 150.0;      // Nm/rad
+    double kd_ik = 15.0;       // Nm·s/rad
 };
 
 class BalanceController {

@@ -43,6 +43,10 @@ struct BalanceControllerParams {
     double kd_roll   = 20.0;   // Nm·s/rad
     double kp_pitch  = 100.0;  // Nm/rad
     double kd_pitch  = 20.0;   // Nm·s/rad
+
+    // ---- IK position PD gains for tau_ik in Eq 9 ----
+    double kp_ik = 150.0;      // Nm/rad
+    double kd_ik = 15.0;       // Nm·s/rad
 };
 
 class BalanceController {
@@ -71,27 +75,10 @@ public:
         double target_pitch,
         const Eigen::Vector4d& current_steer_angles,
         const Eigen::Vector4d& current_ecc_angles,
+        const Eigen::Matrix3d& R_T,
         double dt,
         bool e_stop_active = false);
 
-    /**
-     * @brief Update with hybrid force-position output (Plan 3 upgrade).
-     *
-     * Computes both the kinematic IK target angles AND the dynamic GRF
-     * torques, then blends them using gain scheduling (Eq 16-17).
-     *
-     * @param target_height Target base height
-     * @param target_roll Target roll angle (includes bank angle)
-     * @param target_pitch Target pitch angle
-     * @param current_steer_angles Current steering angles
-     * @param current_ecc_angles Current eccentric angles
-     * @param body_state Current body state from state estimator
-     * @param contact_points Wheel contact positions in world frame
-     * @param contact_valid Which legs are in ground contact
-     * @param dt Time step
-     * @param e_stop_active Emergency stop flag
-     * @return ControlOutput with both position and torque commands + blend mode
-     */
     ControlOutput updateHybrid(
         double target_height,
         double target_roll,
@@ -101,6 +88,7 @@ public:
         const BodyState& body_state,
         const std::array<Eigen::Vector3d, NUM_LEGS>& contact_points,
         const std::array<bool, NUM_LEGS>& contact_valid,
+        const Eigen::Matrix3d& R_T,
         double dt,
         bool e_stop_active = false);
 

@@ -22,9 +22,9 @@ Eigen::Matrix<double, 4, 3> MobedKinematics::getSteerPositions() const {
 
 std::tuple<Eigen::Vector4d, Eigen::Vector4d> MobedKinematics::computeDrivingIK(
     const Eigen::Vector3d& v_body,
-    const Eigen::Vector4d& current_steer_angles) const {
+    const Eigen::Vector4d& current_steer_angles,
+    const Eigen::Vector4d& current_ecc_angles) const {
     
-    Eigen::Matrix<double, 4, 3> steer_pos = getSteerPositions();
     Eigen::Vector4d target_steer_angles;
     Eigen::Vector4d target_wheel_speeds;
 
@@ -33,11 +33,14 @@ std::tuple<Eigen::Vector4d, Eigen::Vector4d> MobedKinematics::computeDrivingIK(
     double wz = v_body.z();
 
     for (int i = 0; i < 4; ++i) {
-        double px = steer_pos(i, 0);
-        double py = steer_pos(i, 1);
+        // 1. Wheel contact point position in Base frame ^B r_i (Section III.D & Eq 7)
+        Eigen::Vector3d B_r_i = computeFootPositionInBase(i, current_steer_angles(i), current_ecc_angles(i));
+        double rx = B_r_i.x();
+        double ry = B_r_i.y();
         
-        double v_ix = vx - wz * py;
-        double v_iy = vy + wz * px;
+        // 2. Linear velocity vector of wheel contact point on ground plane: v_W,i = v_body + omega x ^B r_i
+        double v_ix = vx - wz * ry;
+        double v_iy = vy + wz * rx;
         
         double target_steer = std::atan2(v_iy, v_ix);
         double speed = std::sqrt(v_ix * v_ix + v_iy * v_iy) / params_.r_wheel;
@@ -47,30 +50,9 @@ std::tuple<Eigen::Vector4d, Eigen::Vector4d> MobedKinematics::computeDrivingIK(
             speed = 0.0;
         }
 
-        // 1. Classic Shortest Path Optimization
+        // 3. Shortest Path Optimization
         double diff = normalize_angle(target_steer - current_steer_angles(i));
         if (std::abs(diff) > M_PI_2) {
-            target_steer = normalize_angle(target_steer + M_PI);
-            speed = -speed;
-        }
-
-        // 2. Forbidden Zone (Self-Collision) Reversal
-        double margin = 5.0 * M_PI / 180.0;
-        bool is_forbidden = false;
-        
-        // FL: [-180, -85] 
-        if (i == FL && target_steer < (-M_PI_2 + margin) && target_steer > -M_PI) is_forbidden = true;
-        
-        // FR: [85, 180] 
-        if (i == FR && target_steer > (M_PI_2 - margin) && target_steer < M_PI) is_forbidden = true;
-        
-        // RL: [-95, 0] (as requested)
-        if (i == RL && target_steer < 0.0 && target_steer > (-M_PI_2 - margin)) is_forbidden = true;
-        
-        // RR: [0, 95] (symmetric to RL)
-        if (i == RR && target_steer > 0.0 && target_steer < (M_PI_2 + margin)) is_forbidden = true;
-
-        if (is_forbidden) {
             target_steer = normalize_angle(target_steer + M_PI);
             speed = -speed;
         }
@@ -129,30 +111,50 @@ Eigen::Vector4d MobedKinematics::computePostureIK(
         double sol1 = normalize_angle(std::asin(sin_val) - alpha);
         double sol2 = normalize_angle(M_PI - std::asin(sin_val) - alpha);
         
-        // Strict sign selection as per paper: 
-        // "Using the FR wheel as a reference, if the wheel is positioned outside the body, 
-        // the solution q_ecc,+ (where q_ecc^d > 0) is selected."
-        // Outside body means extending outward.
-        // For front wheels, outward means q > 0. For rear wheels, outward means q < 0.
+        // Strict sign selection & feasible workspace filtering (Eq 15)
+        // Normal operating range: eccentric arm must point generally downwards
+        // to support the chassis (|q_ecc| <= max_ecc_angle).
+        double max_angle = 1.745; // ~100 deg
+        bool sol1_feasible = std::abs(sol1) <= max_angle;
+        bool sol2_feasible = std::abs(sol2) <= max_angle;
+
         bool is_front = (i == FL || i == FR);
         bool target_positive = outward_config ? is_front : !is_front;
-        
+
         double q_ecc;
         if (target_positive) {
-            // We want the solution that is > 0 (or closest to it)
-            q_ecc = (sol1 >= -1e-3) ? sol1 : sol2;
-            // If both are negative somehow, we just pick the maximum one
-            if (sol1 < 0 && sol2 < 0) q_ecc = std::max(sol1, sol2);
+            // Prefer positive solution within feasible range
+            if (sol1_feasible && sol1 >= 0.0) q_ecc = sol1;
+            else if (sol2_feasible && sol2 >= 0.0) q_ecc = sol2;
+            else if (sol1_feasible) q_ecc = sol1;
+            else if (sol2_feasible) q_ecc = sol2;
+            else q_ecc = (sol1 >= 0.0) ? sol1 : sol2;
         } else {
-            // We want the solution that is < 0 (or closest to it)
-            q_ecc = (sol1 <= 1e-3) ? sol1 : sol2;
-            if (sol1 > 0 && sol2 > 0) q_ecc = std::min(sol1, sol2);
+            // Prefer negative solution within feasible range
+            if (sol1_feasible && sol1 <= 0.0) q_ecc = sol1;
+            else if (sol2_feasible && sol2 <= 0.0) q_ecc = sol2;
+            else if (sol1_feasible) q_ecc = sol1;
+            else if (sol2_feasible) q_ecc = sol2;
+            else q_ecc = (sol1 <= 0.0) ? sol1 : sol2;
         }
-        
+
         target_ecc_angles(i) = normalize_angle(q_ecc);
     }
     
     return target_ecc_angles;
+}
+
+Eigen::Vector3d MobedKinematics::computeFootPositionInBase(
+    int leg_index, double q_str, double q_ecc) const {
+    double px = (leg_index == FL || leg_index == FR) ? params_.length_x : -params_.length_x;
+    double py = (leg_index == FL || leg_index == RL) ? params_.width_y : -params_.width_y;
+
+    // Contact point vector ^B r_i from base origin to contact point C (Section III.A & Eq 2)
+    return Eigen::Vector3d(
+        px + params_.l_ecc * std::cos(q_str) * std::sin(q_ecc),
+        py + params_.l_ecc * std::sin(q_str) * std::sin(q_ecc),
+        -params_.posture_z_offset - params_.l_ecc * std::cos(q_ecc) - params_.r_wheel
+    );
 }
 
 } // namespace kinematics

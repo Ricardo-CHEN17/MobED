@@ -85,11 +85,11 @@ public:
         double roll,
         double pitch) const;
 
-    // Tuning parameters
-    double regularization_weight = 0.001;  // alpha: prevents extreme force solutions
+    // Tuning parameters (Paper Eq 13: min ||A*f - b||_Q^2 + ||f||_R^2 + ||f - f_prev||_P^2)
     double max_grf_per_leg = 500.0;        // N, maximum force per leg
-    double weight_Q = 100.0;               // Weight for dynamics soft constraint
-    double weight_R = 1.0;                 // Weight for smoothing penalty
+    double weight_Q = 100.0;               // Weight for dynamics soft constraint (Q)
+    double weight_R = 0.01;                // Weight for absolute force regularization (R)
+    double weight_P = 1.0;                 // Weight for force smoothing penalty (P)
 
 private:
     RobotParams params_;

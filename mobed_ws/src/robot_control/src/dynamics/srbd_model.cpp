@@ -120,12 +120,13 @@ void SrbdModel::buildDynamicsConstraints(
         int leg_idx = contact_indices[j];
         Eigen::Vector3d r_i = contact_points_[leg_idx] - p_com;
 
-        A(0, j) =  0.0;
-        A(1, j) =  0.0;
-        A(2, j) =  1.0;
-        A(3, j) =  r_i.y();   // r_iy
-        A(4, j) = -r_i.x();   // -r_ix
-        A(5, j) =  0.0;
+        // A_i * ^B f_i = [ I ; [r_i]x ] * R * [0, 0, f_z,i]^T (Eq 11 in paper)
+        // R.col(2) is R * [0, 0, 1]^T
+        Eigen::Vector3d f_dir = R.col(2);
+        Eigen::Vector3d tau_dir = r_i.cross(f_dir);
+
+        A.block<3, 1>(0, j) = f_dir;
+        A.block<3, 1>(3, j) = tau_dir;
     }
 }
 

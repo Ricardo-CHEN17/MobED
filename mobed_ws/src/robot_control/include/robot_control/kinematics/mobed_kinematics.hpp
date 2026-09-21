@@ -35,16 +35,18 @@ public:
     MobedKinematics(const MobedParameters& params = MobedParameters());
 
     /**
-     * @brief Compute Driving Inverse Kinematics (Swerve Drive with continuous rotation)
+     * @brief Compute Driving Inverse Kinematics (Eq 7 in paper)
      * 
      * @param v_body [v_x, v_y, omega_z] target velocity of the body
      * @param current_steer_angles [FL, FR, RL, RR] Current steering angles for shortest-path optimization
+     * @param current_ecc_angles [FL, FR, RL, RR] Current eccentric angles for exact contact point ^B r_i
      * @return std::tuple<Eigen::Vector4d, Eigen::Vector4d> 
      *         Tuple of (steer_angles [FL, FR, RL, RR], wheel_speeds [FL, FR, RL, RR])
      */
     std::tuple<Eigen::Vector4d, Eigen::Vector4d> computeDrivingIK(
         const Eigen::Vector3d& v_body,
-        const Eigen::Vector4d& current_steer_angles) const;
+        const Eigen::Vector4d& current_steer_angles,
+        const Eigen::Vector4d& current_ecc_angles) const;
 
     /**
      * @brief Compute Posture Inverse Kinematics (Exact Non-linear Solution)
@@ -63,6 +65,17 @@ public:
         const Eigen::Vector4d& current_steer_angles,
         const Eigen::Matrix3d& R_T,
         bool outward_config = true) const;
+
+    /**
+     * @brief Compute the 3D position of wheel contact point in Base frame (Eq 2)
+     * 
+     * @param leg_index Leg index (FL, FR, RL, RR)
+     * @param q_str Steering joint angle (rad)
+     * @param q_ecc Eccentric posture joint angle (rad)
+     * @return Eigen::Vector3d Contact point position in Base frame [x, y, z]^T
+     */
+    Eigen::Vector3d computeFootPositionInBase(
+        int leg_index, double q_str, double q_ecc) const;
 
     /**
      * @brief Get the Steer Joint positions in Base frame

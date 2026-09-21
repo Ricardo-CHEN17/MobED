@@ -31,7 +31,7 @@ public:
         // Initialize shared parameters and kinematics
         // ============================================================
         robot_params_ = RobotParams();
-        auto kinematics = std::make_shared<kinematics::MobedKinematics>();
+        kinematics_ = std::make_shared<kinematics::MobedKinematics>();
 
         // ============================================================
         // Initialize all algorithm modules
@@ -39,8 +39,8 @@ public:
         controllers::DrivingControllerParams drive_params;
         controllers::BalanceControllerParams balance_params;
 
-        driving_controller_  = std::make_unique<controllers::DrivingController>(drive_params, kinematics);
-        balance_controller_  = std::make_unique<controllers::BalanceController>(balance_params, kinematics);
+        driving_controller_  = std::make_unique<controllers::DrivingController>(drive_params, kinematics_);
+        balance_controller_  = std::make_unique<controllers::BalanceController>(balance_params, kinematics_);
         state_estimator_     = std::make_unique<estimation::StateEstimator>(robot_params_);
         terrain_estimator_   = std::make_unique<estimation::TerrainEstimator>(robot_params_);
         contact_detector_    = std::make_unique<estimation::ContactDetector>(robot_params_);
@@ -50,7 +50,9 @@ public:
         // Initialize state variables
         // ============================================================
         curr_steer_angles_.setZero();
+        curr_steer_velocities_.setZero();
         curr_ecc_angles_.setZero();
+        curr_ecc_velocities_.setZero();
         curr_ecc_efforts_.setZero();
         curr_wheel_efforts_.setZero();
         curr_wheel_velocities_.setZero();
@@ -159,18 +161,28 @@ private:
             double effort = has_effort ? msg->effort[i] : 0.0;
             double vel = has_vel ? msg->velocity[i] : 0.0;
 
-            // ---- Steering joints: position ----
-            if (name == "Steering_joint_LF") curr_steer_angles_(0) = pos * steer_signs_[0];
-            else if (name == "Steering_joint_RF") curr_steer_angles_(1) = pos * steer_signs_[1];
-            else if (name == "Steering_joint_LB") curr_steer_angles_(2) = pos * steer_signs_[2];
-            else if (name == "Steering_joint_RB") curr_steer_angles_(3) = pos * steer_signs_[3];
+            // ---- Steering joints: position + velocity ----
+            if (name == "Steering_joint_LF") {
+                curr_steer_angles_(0) = pos * steer_signs_[0];
+                curr_steer_velocities_(0) = vel * steer_signs_[0];
+            } else if (name == "Steering_joint_RF") {
+                curr_steer_angles_(1) = pos * steer_signs_[1];
+                curr_steer_velocities_(1) = vel * steer_signs_[1];
+            } else if (name == "Steering_joint_LB") {
+                curr_steer_angles_(2) = pos * steer_signs_[2];
+                curr_steer_velocities_(2) = vel * steer_signs_[2];
+            } else if (name == "Steering_joint_RB") {
+                curr_steer_angles_(3) = pos * steer_signs_[3];
+                curr_steer_velocities_(3) = vel * steer_signs_[3];
+            }
 
-            // ---- Eccentric joints: position + effort ----
+            // ---- Eccentric joints: position + velocity + effort ----
             else if (name == "Posture_control_joint_LF") {
                 double q = (pos - ecc_offsets_[0]) * ecc_signs_[0];
                 while (q >  M_PI) q -= 2.0 * M_PI;
                 while (q <= -M_PI) q += 2.0 * M_PI;
                 curr_ecc_angles_(0) = q;
+                curr_ecc_velocities_(0) = vel * ecc_signs_[0];
                 curr_ecc_efforts_(0) = effort;
             }
             else if (name == "Posture_control_joint_RF") {
@@ -178,6 +190,7 @@ private:
                 while (q >  M_PI) q -= 2.0 * M_PI;
                 while (q <= -M_PI) q += 2.0 * M_PI;
                 curr_ecc_angles_(1) = q;
+                curr_ecc_velocities_(1) = vel * ecc_signs_[1];
                 curr_ecc_efforts_(1) = effort;
             }
             else if (name == "Posture_control_joint_LB") {
@@ -185,6 +198,7 @@ private:
                 while (q >  M_PI) q -= 2.0 * M_PI;
                 while (q <= -M_PI) q += 2.0 * M_PI;
                 curr_ecc_angles_(2) = q;
+                curr_ecc_velocities_(2) = vel * ecc_signs_[2];
                 curr_ecc_efforts_(2) = effort;
             }
             else if (name == "Posture_control_joint_RB") {
@@ -192,6 +206,7 @@ private:
                 while (q >  M_PI) q -= 2.0 * M_PI;
                 while (q <= -M_PI) q += 2.0 * M_PI;
                 curr_ecc_angles_(3) = q;
+                curr_ecc_velocities_(3) = vel * ecc_signs_[3];
                 curr_ecc_efforts_(3) = effort;
             }
 
@@ -248,16 +263,17 @@ private:
         }
 
         // ============================================================
-        // Phase 2: State Estimation (EKF predict + odometry correct)
+        // Phase 2: State Estimation (EKF predict + odometry correct Eq 3)
         // ============================================================
         if (imu_received_) {
             state_estimator_->predict(latest_imu_, dt);
         }
-        // Odometry correction using 4 wheel velocities
-        state_estimator_->correctWithOdometry(curr_wheel_velocities_, curr_steer_angles_, curr_ecc_angles_);
+        Eigen::Vector3d omega_body = imu_received_ ? latest_imu_.angular_velocity : Eigen::Vector3d::Zero();
+        state_estimator_->correctWithOdometry(
+            curr_wheel_velocities_, curr_steer_angles_, curr_ecc_angles_,
+            curr_steer_velocities_, curr_ecc_velocities_, omega_body);
 
         BodyState body_state = state_estimator_->getState();
-        (void)body_state;  // Suppress unused warning (will be used when hybrid mode is active)
 
         // ============================================================
         // Phase 3: Contact Detection (torque monitoring)
@@ -278,6 +294,28 @@ private:
             RCLCPP_INFO(this->get_logger(), "FSM Transition: %s → %s",
                         prev_state_name.c_str(), curr_state_name.c_str());
             prev_state_name = curr_state_name;
+        }
+
+        // ============================================================
+        // Phase 2.5: Terrain Estimation (Eq 4-6 in paper)
+        // ============================================================
+        std::array<Eigen::Vector3d, NUM_LEGS> contact_points_world;
+        std::array<bool, NUM_LEGS> contact_valid = task_controller_->getContactValid();
+
+        Eigen::Vector3d base_pos = body_state.position;
+        Eigen::Matrix3d R_base = body_state.orientation.toRotationMatrix();
+
+        for (int i = 0; i < NUM_LEGS; ++i) {
+            Eigen::Vector3d B_r_i = kinematics_->computeFootPositionInBase(
+                i, curr_steer_angles_(i), curr_ecc_angles_(i));
+            // p_C = p + R * ^B r_i (Eq 2)
+            contact_points_world[i] = base_pos + R_base * B_r_i;
+        }
+
+        // Run plane fitting via pseudo-inverse least squares (Eq 5: a = W^+ p^z)
+        // Only update continuous terrain plane when FSM is not actively negotiating discontinuous obstacles
+        if (!task_controller_->isActive()) {
+            terrain_estimator_->update(contact_points_world, contact_valid);
         }
 
         // ============================================================
@@ -307,9 +345,13 @@ private:
 
         Eigen::Matrix3d R_T = terrain_estimator_->getState().rotation;
 
-        Eigen::Vector4d target_ecc = balance_controller_->update(
+        // Call updateHybrid using contact points from Phase 2.5 and body_state from Phase 2
+        ControlOutput balance_out = balance_controller_->updateHybrid(
             active_height, active_roll, active_pitch,
-            target_steer, curr_ecc_angles_, R_T, dt, e_stop_active_);
+            target_steer, curr_ecc_angles_, body_state,
+            contact_points_world, contact_valid, R_T, dt, e_stop_active_);
+
+        Eigen::Vector4d target_ecc = balance_out.ecc_angles;
 
         // ============================================================
         // Phase 7: FSM Override — replace specific legs if climbing
@@ -346,8 +388,9 @@ private:
             cmd_msg.name.push_back(steer_names[i]);
             cmd_msg.position.push_back(target_steer(i) * steer_signs_[i]);
             cmd_msg.velocity.push_back(0.0);
+            cmd_msg.effort.push_back(0.0);
 
-            // Eccentric: math → CAD
+            // Eccentric: math → CAD (position + hybrid torque)
             cmd_msg.name.push_back(ecc_names[i]);
             double cad_angle = target_ecc(i) * ecc_signs_[i] + ecc_offsets_[i];
             while (cad_angle >  M_PI) cad_angle -= 2.0 * M_PI;
@@ -355,10 +398,17 @@ private:
             cmd_msg.position.push_back(cad_angle);
             cmd_msg.velocity.push_back(0.0);
 
+            // Zero out feedforward GRF torque for FSM-overridden legs to prevent conflict with position trajectory
+            double effort_cmd = (task_controller_->isActive() && task_controller_->getOverrideMask()[i])
+                              ? 0.0
+                              : balance_out.ecc_torques(i) * ecc_signs_[i];
+            cmd_msg.effort.push_back(effort_cmd);
+
             // Wheels: math → CAD
             cmd_msg.name.push_back(wheel_names[i]);
             cmd_msg.position.push_back(0.0);
             cmd_msg.velocity.push_back(target_wheel(i) * wheel_signs_[i]);
+            cmd_msg.effort.push_back(0.0);
         }
 
         pub_joint_cmds_->publish(cmd_msg);
@@ -367,6 +417,7 @@ private:
     // ================================================================
     // Algorithm Modules
     // ================================================================
+    std::shared_ptr<kinematics::MobedKinematics>      kinematics_;
     std::unique_ptr<controllers::DrivingController>  driving_controller_;
     std::unique_ptr<controllers::BalanceController>   balance_controller_;
     std::unique_ptr<estimation::StateEstimator>       state_estimator_;
@@ -397,7 +448,9 @@ private:
     double target_pitch_  = 0.0;
 
     Eigen::Vector4d curr_steer_angles_;
+    Eigen::Vector4d curr_steer_velocities_;
     Eigen::Vector4d curr_ecc_angles_;
+    Eigen::Vector4d curr_ecc_velocities_;
     Eigen::Vector4d curr_ecc_efforts_;
     Eigen::Vector4d curr_wheel_efforts_;
     Eigen::Vector4d curr_wheel_velocities_;

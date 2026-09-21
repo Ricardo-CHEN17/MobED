@@ -43,7 +43,7 @@ public:
     Eigen::Vector4d computeOptimalGRF(
         const SrbdModel& srbd,
         const Eigen::Vector3d& desired_linear_accel,
-        const Eigen::Vector3d& desired_angular_accel) const;
+        const Eigen::Vector3d& desired_angular_accel);
 
     /**
      * @brief Map vertical GRFs to eccentric joint torques via Jacobian transpose.
@@ -85,12 +85,15 @@ public:
         double roll,
         double pitch) const;
 
-    // Tuning parameters
-    double regularization_weight = 0.001;  // alpha: prevents extreme force solutions
+    // Tuning parameters (Paper Eq 13: min ||A*f - b||_Q^2 + ||f||_R^2 + ||f - f_prev||_P^2)
     double max_grf_per_leg = 500.0;        // N, maximum force per leg
+    double weight_Q = 100.0;               // Weight for dynamics soft constraint (Q)
+    double weight_R = 0.01;                // Weight for absolute force regularization (R)
+    double weight_P = 1.0;                 // Weight for force smoothing penalty (P)
 
 private:
     RobotParams params_;
+    Eigen::Vector4d prev_grf_result_ = Eigen::Vector4d::Zero();
 };
 
 }  // namespace dynamics

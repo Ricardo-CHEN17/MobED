@@ -9,9 +9,14 @@ namespace robot_control {
 // ============================================================================
 struct RobotParams {
     // -----------------------------------------------
-    // Mass & Inertia (for future SRBD / QP in Plan 2)
+    // Mass & Inertia (Aligned with Paper Section II.B & III.E)
     // -----------------------------------------------
-    double total_mass = 70.0;  // kg, total robot mass including payload
+    // Base platform weight excluding payload (Table I & Section II.B)
+    double body_mass = 70.0;     // kg, unladen robot body mass
+    // Current payload mass carried by the robot (up to 56.0 kg per paper)
+    double payload_mass = 0.0;   // kg, default to unladen (can be set up to 56.0 kg)
+    // Total mass m = body_mass + payload_mass (Eq 11)
+    double total_mass = 70.0;    // kg, updated dynamically or initialized to body_mass
     // Body inertia tensor about CoM, in body frame (kg·m²)
     // Approximate values — must be refined from CAD or system identification
     Eigen::Matrix3d inertia = (Eigen::Matrix3d() <<

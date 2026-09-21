@@ -18,6 +18,8 @@ void TaskController::reset() {
     state_timer_ = 0.0;
     contact_debounce_ = 0.0;
     lift_start_angles_ = Eigen::Vector4d::Zero();
+    front_target_angles_ = Eigen::Vector2d::Zero();
+    rear_target_angles_ = Eigen::Vector2d::Zero();
 }
 
 void TaskController::abort() {
@@ -88,6 +90,8 @@ void TaskController::planFrontLiftTrajectories(const Eigen::Vector4d& current_ec
     }
 
     lift_start_angles_ = current_ecc_angles;
+    front_target_angles_(0) = current_ecc_angles(FL) + params_.step_over_angle;
+    front_target_angles_(1) = current_ecc_angles(FR) + params_.step_over_angle;
 }
 
 void TaskController::planRearLiftTrajectories(const Eigen::Vector4d& current_ecc_angles) {
@@ -119,6 +123,8 @@ void TaskController::planRearLiftTrajectories(const Eigen::Vector4d& current_ecc
     }
 
     lift_start_angles_ = current_ecc_angles;
+    rear_target_angles_(0) = current_ecc_angles(RL) + params_.step_over_angle;
+    rear_target_angles_(1) = current_ecc_angles(RR) + params_.step_over_angle;
 }
 
 void TaskController::update(
@@ -140,13 +146,7 @@ void TaskController::update(
         // ============================================================
         case ClimbState::IDLE: {
             if (contact_detector.frontImpactDetected()) {
-                contact_debounce_ += dt;
-                if (contact_debounce_ >= params_.contact_debounce_time) {
-                    contact_debounce_ = 0.0;
-                    transitionTo(ClimbState::FRONT_CONTACT);
-                }
-            } else {
-                contact_debounce_ = 0.0;
+                transitionTo(ClimbState::FRONT_CONTACT);
             }
             break;
         }
@@ -196,23 +196,20 @@ void TaskController::update(
         // Wait for rear wheels to reach the obstacle
         // ============================================================
         case ClimbState::FRONT_PLACED: {
+            // Maintain front wheels on top of curb
+            override_mask_[FL] = true;
+            override_mask_[FR] = true;
+            ecc_overrides_(FL) = front_target_angles_(0);
+            ecc_overrides_(FR) = front_target_angles_(1);
+
             // Command forward motion to advance the body
             forward_vel_override_ = params_.forward_drive_speed;
 
             // Monitor for rear wheel impact
             if (contact_detector.rearImpactDetected()) {
-                contact_debounce_ += dt;
-                if (contact_debounce_ >= params_.contact_debounce_time) {
-                    contact_debounce_ = 0.0;
-                    transitionTo(ClimbState::REAR_CONTACT);
-                }
-            } else {
-                contact_debounce_ = 0.0;
-            }
-
-            // Safety timeout: if we've been driving too long without rear contact
-            if (state_timer_ > params_.forward_drive_duration) {
-                // Assume rear wheels reached the obstacle even without detection
+                transitionTo(ClimbState::REAR_CONTACT);
+            } else if (state_timer_ > params_.forward_drive_duration) {
+                // Safety timeout: if we've been driving too long without rear contact
                 transitionTo(ClimbState::REAR_CONTACT);
             }
             break;
@@ -222,6 +219,12 @@ void TaskController::update(
         // REAR_CONTACT: Rear wheels hit stair, prepare to lift
         // ============================================================
         case ClimbState::REAR_CONTACT: {
+            // Maintain front wheels on top of curb
+            override_mask_[FL] = true;
+            override_mask_[FR] = true;
+            ecc_overrides_(FL) = front_target_angles_(0);
+            ecc_overrides_(FR) = front_target_angles_(1);
+
             forward_vel_override_ = 0.0;
             planRearLiftTrajectories(current_ecc_angles);
             transitionTo(ClimbState::REAR_LIFT);
@@ -230,9 +233,15 @@ void TaskController::update(
 
         // ============================================================
         // REAR_LIFT: Execute rear leg step-over trajectory
-        // Override RL and RR eccentric joints
+        // Override FL and FR to hold curb height, RL and RR to trajectory
         // ============================================================
         case ClimbState::REAR_LIFT: {
+            // Front wheels stay on top of curb
+            override_mask_[FL] = true;
+            override_mask_[FR] = true;
+            ecc_overrides_(FL) = front_target_angles_(0);
+            ecc_overrides_(FR) = front_target_angles_(1);
+
             override_mask_[RL] = true;
             override_mask_[RR] = true;
 
@@ -255,6 +264,17 @@ void TaskController::update(
         // REAR_PLACED: All wheels on top, move forward a certain distance (Step 6)
         // ============================================================
         case ClimbState::REAR_PLACED: {
+            // Maintain all 4 wheels on top of curb
+            override_mask_[FL] = true;
+            override_mask_[FR] = true;
+            ecc_overrides_(FL) = front_target_angles_(0);
+            ecc_overrides_(FR) = front_target_angles_(1);
+
+            override_mask_[RL] = true;
+            override_mask_[RR] = true;
+            ecc_overrides_(RL) = rear_target_angles_(0);
+            ecc_overrides_(RR) = rear_target_angles_(1);
+
             // Command forward motion to advance the body fully onto the obstacle
             forward_vel_override_ = params_.forward_drive_speed;
 
@@ -263,6 +283,17 @@ void TaskController::update(
             }
             break;
         }
+    }
+}
+
+std::array<bool, NUM_LEGS> TaskController::getContactValid() const {
+    switch (state_) {
+        case ClimbState::FRONT_LIFT:
+            return {false, false, true, true};
+        case ClimbState::REAR_LIFT:
+            return {true, true, false, false};
+        default:
+            return {true, true, true, true};
     }
 }
 

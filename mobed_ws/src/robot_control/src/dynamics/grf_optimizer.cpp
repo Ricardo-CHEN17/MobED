@@ -41,16 +41,16 @@ Eigen::Vector4d GrfOptimizer::computeOptimalGRF(
     // ================================================================
     // Build QP cost function (Eq 13 in the paper)
     //
-    //   min  || A_dyn * f - b_dyn ||_Q^2 + || f - f_prev ||_R^2
+    //   min  || A_dyn * f - b_dyn ||_Q^2 + || f ||_R^2 + || f - f_prev ||_P^2
     //
-    // This is equivalent to min 0.5 * f^T * H * f + g^T * f
-    // where H = 2 * (Q * A_dyn^T * A_dyn + R * I)
-    //       g = 2 * (-Q * A_dyn^T * b_dyn - R * f_prev)
+    // This is equivalent to min 0.5 * f^T * H * f + f_cost^T * f
+    // where H = 2 * (weight_Q * A_dyn^T * A_dyn + (weight_R + weight_P) * I)
+    //       f_cost = 2 * (-weight_Q * A_dyn^T * b_dyn - weight_P * f_prev)
     // ================================================================
     Eigen::MatrixXd H = 2.0 * (weight_Q * A_dyn.transpose() * A_dyn + 
-                               weight_R * Eigen::MatrixXd::Identity(n_contact, n_contact));
+                               (weight_R + weight_P) * Eigen::MatrixXd::Identity(n_contact, n_contact));
     
-    Eigen::VectorXd f_cost = 2.0 * (-weight_Q * A_dyn.transpose() * b_dyn - weight_R * f_prev);
+    Eigen::VectorXd f_cost = 2.0 * (-weight_Q * A_dyn.transpose() * b_dyn - weight_P * f_prev);
 
     // ================================================================
     // Assemble QP problem

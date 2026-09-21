@@ -47,6 +47,7 @@ void StateEstimator::predict(const ImuData& imu, double dt) {
     // ================================================================
     // 1. Integrate orientation using gyroscope (first-order quaternion)
     // ================================================================
+    latest_omega_body_ = imu.angular_velocity;
     Eigen::Vector3d omega = imu.angular_velocity;  // body-frame angular velocity
     double omega_norm = omega.norm();
 
@@ -90,22 +91,25 @@ void StateEstimator::predict(const ImuData& imu, double dt) {
 
 void StateEstimator::correctWithOdometry(const Eigen::Vector4d& wheel_velocities,
                                          const Eigen::Vector4d& steer_angles,
-                                         const Eigen::Vector4d& ecc_angles) {
+                                         const Eigen::Vector4d& ecc_angles,
+                                         const Eigen::Vector4d& steer_vels,
+                                         const Eigen::Vector4d& ecc_vels,
+                                         const Eigen::Vector3d& omega_body) {
     if (!initialized_) return;
 
-    // ================================================================
-    // Eq 3 from paper: v_body = 1/4 * sum( - [omega_body]x B_r_i - B_r_dot_i )
-    // Since contact point velocity in world p_dot_C = 0,
-    // B_r_dot_i is the contact point velocity relative to the base frame.
-    // The wheel rolls forward, so the contact point moves backward relative to the base:
-    // B_r_dot_i = - v_wheel * [cos(q_steer), sin(q_steer), 0]^T
-    // where v_wheel = wheel_velocity_rad_s * r_wheel.
-    // ================================================================
-
+    latest_omega_body_ = omega_body;
     Eigen::Matrix3d R = orientation_.toRotationMatrix();
-    // In our simplified EKF, we don't have angular velocity in the state,
-    // so we assume it is zero or could use gyro. For now we just use 0.
-    Eigen::Vector3d omega_body = Eigen::Vector3d::Zero();
+
+    // ================================================================
+    // Eq 3 from paper:
+    //   p_dot = 1/4 * sum_{i=1}^4 ( p_dot_C,i - [omega]x R ^B r_i - R ^B r_dot_i )
+    // In body frame (multiplying by R^T):
+    //   v_body = R^T * p_dot = 1/4 * sum_{i=1}^4 ( - [omega_body]x ^B r_i - ^B r_dot_i )
+    // where:
+    //   ^B r_i is contact position in base frame
+    //   ^B r_dot_i is contact velocity relative to base frame:
+    //     ^B r_dot_i = d(^B r_i)/dt_joints + v_wheel_rolling
+    // ================================================================
 
     Eigen::Vector3d v_body_meas = Eigen::Vector3d::Zero();
 
@@ -114,22 +118,37 @@ void StateEstimator::correctWithOdometry(const Eigen::Vector4d& wheel_velocities
         double py = (i == 0 || i == 2) ? params_.width_y : -params_.width_y;
         double q_str = steer_angles(i);
         double q_ecc = ecc_angles(i);
+        double dq_str = steer_vels(i);
+        double dq_ecc = ecc_vels(i);
         double v_wheel = wheel_velocities(i) * params_.r_wheel;
 
-        // Contact position in base frame B_r_i
+        // 1. Contact position in base frame ^B r_i (Eq 2)
         Eigen::Vector3d B_r_i(
             px + params_.l_ecc * std::cos(q_str) * std::sin(q_ecc),
             py + params_.l_ecc * std::sin(q_str) * std::sin(q_ecc),
             -params_.posture_z_offset - params_.l_ecc * std::cos(q_ecc) - params_.r_wheel
         );
 
-        // Contact velocity relative to base frame B_r_dot_i
-        Eigen::Vector3d B_r_dot_i(
+        // 2. Relative velocity ^B r_dot_i (Eq 3)
+        // (a) Differential motion from steering and eccentric joints
+        Eigen::Vector3d B_r_dot_joints(
+            -params_.l_ecc * std::sin(q_str) * std::sin(q_ecc) * dq_str 
+                + params_.l_ecc * std::cos(q_str) * std::cos(q_ecc) * dq_ecc,
+             params_.l_ecc * std::cos(q_str) * std::sin(q_ecc) * dq_str 
+                + params_.l_ecc * std::sin(q_str) * std::cos(q_ecc) * dq_ecc,
+             params_.l_ecc * std::sin(q_ecc) * dq_ecc
+        );
+
+        // (b) Wheel rolling on ground (contact point moves backward relative to wheel axle)
+        Eigen::Vector3d B_r_dot_roll(
             -v_wheel * std::cos(q_str),
             -v_wheel * std::sin(q_str),
             0.0
         );
 
+        Eigen::Vector3d B_r_dot_i = B_r_dot_joints + B_r_dot_roll;
+
+        // Eq 3: v_body = - omega_body x ^B r_i - ^B r_dot_i
         v_body_meas += (-omega_body.cross(B_r_i) - B_r_dot_i);
     }
     v_body_meas /= 4.0;
@@ -167,10 +186,8 @@ BodyState StateEstimator::getState() const {
     state.linear_velocity = x_.segment<3>(3);
     state.orientation = orientation_;
 
-    // Angular velocity from the most recent IMU reading is embedded in the
-    // orientation integration. We store it in world frame for consumers.
-    // Note: For a full implementation, this would be maintained as part of state.
-    state.angular_velocity = Eigen::Vector3d::Zero();
+    // Angular velocity in world frame: omega_world = R * omega_body
+    state.angular_velocity = orientation_.toRotationMatrix() * latest_omega_body_;
 
     return state;
 }

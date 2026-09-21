@@ -267,19 +267,31 @@ ControlOutput BalanceController::updateHybrid(
     prev_ecc_angles_ = smoothed_ik;
 
     // ================================================================
-    // 5. Assemble hybrid output
+    // 5. Hybrid Control Strategy (Eq 9 in paper)
+    //    tau_ecc,i^* = w_grf * tau_grf,i + w_ik * tau_ik,i
     // ================================================================
-    output.ecc_angles  = smoothed_ik;
-    output.ecc_torques = grf_torques;
+    Eigen::Vector4d tau_ik = Eigen::Vector4d::Zero();
+    Eigen::Vector4d tau_hybrid = Eigen::Vector4d::Zero();
+    Eigen::Vector4d compliant_ecc_pos = smoothed_ik;
 
-    // Determine output mode based on gain scheduling
-    if (w_grf < 0.01) {
-        output.ecc_mode = ControlOutput::EccMode::POSITION;
-    } else if (w_ik < 0.01) {
-        output.ecc_mode = ControlOutput::EccMode::TORQUE;
-    } else {
-        output.ecc_mode = ControlOutput::EccMode::HYBRID;
+    for (int i = 0; i < NUM_LEGS; ++i) {
+        // tau_ik: PD position tracking torque (Section III.E.1 & III.E.3)
+        double pos_err = smoothed_ik(i) - current_ecc_angles(i);
+        tau_ik(i) = params_.kp_ik * pos_err;
+
+        // Eq 9: Hybrid torque combination
+        tau_hybrid(i) = w_grf * grf_torques(i) + w_ik * tau_ik(i);
+
+        // Dynamically compliant position setpoint for position-controlled actuators:
+        // Allows the leg to comply with ground reaction force (active suspension)
+        double compliance_shift = (w_grf * grf_torques(i)) / (w_ik * params_.kp_ik + 1e-4);
+        compliant_ecc_pos(i) = std::clamp(smoothed_ik(i) + compliance_shift,
+                                          params_.min_ecc_angle, params_.max_ecc_angle);
     }
+
+    output.ecc_angles  = compliant_ecc_pos;
+    output.ecc_torques = tau_hybrid;
+    output.ecc_mode    = ControlOutput::EccMode::HYBRID;
 
     return output;
 }
