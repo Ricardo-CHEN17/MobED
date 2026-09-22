@@ -108,8 +108,9 @@ double GrfOptimizer::computeVerticalJacobian(
     //   A = l_ecc * (r31*cos(q_steer) + r32*sin(q_steer))
     //   B = -l_ecc * r33
     //
+    // z_world = const + A*sin(q_ecc) + B*cos(q_ecc)
     // Therefore:
-    //   dz/dq_ecc = d(A*cos(q) + B*sin(q))/dq = -A*sin(q) + B*cos(q)
+    //   dz/dq_ecc = d(A*sin(q) + B*cos(q))/dq = A*cos(q_ecc) - B*sin(q_ecc)
     // ================================================================
 
     double cp = std::cos(pitch);
@@ -127,8 +128,8 @@ double GrfOptimizer::computeVerticalJacobian(
     double A = params_.l_ecc * (r31 * std::cos(q_steer) + r32 * std::sin(q_steer));
     double B = -params_.l_ecc * r33;
 
-    // dz/dq_ecc = -A*sin(q_ecc) + B*cos(q_ecc)
-    double J_z = -A * std::sin(q_ecc) + B * std::cos(q_ecc);
+    // dz/dq_ecc = A*cos(q_ecc) - B*sin(q_ecc)
+    double J_z = A * std::cos(q_ecc) - B * std::sin(q_ecc);
 
     return J_z;
 }

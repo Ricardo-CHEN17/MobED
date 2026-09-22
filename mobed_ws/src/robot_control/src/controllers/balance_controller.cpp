@@ -267,12 +267,15 @@ ControlOutput BalanceController::updateHybrid(
     prev_ecc_angles_ = smoothed_ik;
 
     // ================================================================
-    // 5. Hybrid Control Strategy (Eq 9 in paper)
+    // 5. Hybrid Control Strategy (Eq 9 in paper) & Admittance Compliance
     //    tau_ecc,i^* = w_grf * tau_grf,i + w_ik * tau_ik,i
     // ================================================================
     Eigen::Vector4d tau_ik = Eigen::Vector4d::Zero();
     Eigen::Vector4d tau_hybrid = Eigen::Vector4d::Zero();
     Eigen::Vector4d compliant_ecc_pos = smoothed_ik;
+
+    // Nominal static weight per leg (4 legs share total weight on flat ground)
+    double nominal_f_z = (robot_params_.total_mass * 9.81) / NUM_LEGS;
 
     for (int i = 0; i < NUM_LEGS; ++i) {
         // tau_ik: PD position tracking torque (Section III.E.1 & III.E.3)
@@ -283,8 +286,17 @@ ControlOutput BalanceController::updateHybrid(
         tau_hybrid(i) = w_grf * grf_torques(i) + w_ik * tau_ik(i);
 
         // Dynamically compliant position setpoint for position-controlled actuators:
-        // Allows the leg to comply with ground reaction force (active suspension)
-        double compliance_shift = (w_grf * grf_torques(i)) / (w_ik * params_.kp_ik + 1e-4);
+        // Allows the leg to comply with dynamic ground reaction force disturbances (active suspension).
+        // On flat ground in steady state, optimal_grf ≈ nominal_f_z => delta_f_z -> 0,
+        // which guarantees that steady-state posture stays strictly symmetric at smoothed_ik.
+        // When hitting a bump/step, delta_f_z > 0 (upward impact):
+        //   - Front leg (q_ecc > 0): yields by retracting (delta_q > 0)
+        //   - Rear leg (q_ecc < 0): yields by retracting (delta_q < 0)
+        double delta_f_z = optimal_grf(i) - nominal_f_z;
+        double sign_leg = (smoothed_ik(i) >= 0.0) ? 1.0 : -1.0;
+        double compliance_shift = sign_leg * (w_grf * delta_f_z) / (params_.compliance_k + 1e-4);
+        compliance_shift = std::clamp(compliance_shift, -params_.max_compliance_shift, params_.max_compliance_shift);
+
         compliant_ecc_pos(i) = std::clamp(smoothed_ik(i) + compliance_shift,
                                           params_.min_ecc_angle, params_.max_ecc_angle);
     }

@@ -36,33 +36,31 @@ void StateEstimator::reset() {
 void StateEstimator::predict(const ImuData& imu, double dt) {
     if (dt <= 0.0 || dt > 0.5) return;  // reject invalid time steps
 
-    if (!initialized_) {
-        // On first call, optionally use IMU orientation if available
-        if (imu.has_orientation) {
-            orientation_ = imu.orientation;
-        }
+    if (imu.has_orientation) {
+        orientation_ = imu.orientation;
         initialized_ = true;
-    }
+    } else {
+        if (!initialized_) {
+            initialized_ = true;
+        }
+        // Integrate orientation using gyroscope (first-order quaternion)
+        latest_omega_body_ = imu.angular_velocity;
+        Eigen::Vector3d omega = imu.angular_velocity;  // body-frame angular velocity
+        double omega_norm = omega.norm();
 
-    // ================================================================
-    // 1. Integrate orientation using gyroscope (first-order quaternion)
-    // ================================================================
+        if (omega_norm > 1e-8) {
+            double half_angle = 0.5 * omega_norm * dt;
+            Eigen::Vector3d axis = omega / omega_norm;
+            Eigen::Quaterniond dq(
+                std::cos(half_angle),
+                axis.x() * std::sin(half_angle),
+                axis.y() * std::sin(half_angle),
+                axis.z() * std::sin(half_angle)
+            );
+            orientation_ = (orientation_ * dq).normalized();
+        }
+    }
     latest_omega_body_ = imu.angular_velocity;
-    Eigen::Vector3d omega = imu.angular_velocity;  // body-frame angular velocity
-    double omega_norm = omega.norm();
-
-    if (omega_norm > 1e-8) {
-        // Quaternion delta from angular velocity
-        double half_angle = 0.5 * omega_norm * dt;
-        Eigen::Vector3d axis = omega / omega_norm;
-        Eigen::Quaterniond dq(
-            std::cos(half_angle),
-            axis.x() * std::sin(half_angle),
-            axis.y() * std::sin(half_angle),
-            axis.z() * std::sin(half_angle)
-        );
-        orientation_ = (orientation_ * dq).normalized();
-    }
 
     // ================================================================
     // 2. Transform accelerometer reading to world frame and remove gravity

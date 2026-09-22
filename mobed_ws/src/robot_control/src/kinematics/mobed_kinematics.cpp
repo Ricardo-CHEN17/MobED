@@ -48,13 +48,19 @@ std::tuple<Eigen::Vector4d, Eigen::Vector4d> MobedKinematics::computeDrivingIK(
         if (std::abs(speed) < 1e-3) {
             target_steer = current_steer_angles(i);
             speed = 0.0;
-        }
-
-        // 3. Shortest Path Optimization
-        double diff = normalize_angle(target_steer - current_steer_angles(i));
-        if (std::abs(diff) > M_PI_2) {
-            target_steer = normalize_angle(target_steer + M_PI);
-            speed = -speed;
+        } else {
+            // 3. Strict mapping to outward hemisphere [-pi/2, pi/2] (Section III.D)
+            // If the desired velocity vector points rearward, keep the steering angle
+            // facing forward/outward and reverse the wheel driving motor (speed = -speed).
+            // This guarantees the steering joint never rotates 180 deg into the under-chassis region.
+            while (target_steer > M_PI_2) {
+                target_steer -= M_PI;
+                speed = -speed;
+            }
+            while (target_steer < -M_PI_2) {
+                target_steer += M_PI;
+                speed = -speed;
+            }
         }
 
         target_steer_angles(i) = target_steer;

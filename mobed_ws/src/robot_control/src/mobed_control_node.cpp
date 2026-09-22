@@ -312,12 +312,6 @@ private:
             contact_points_world[i] = base_pos + R_base * B_r_i;
         }
 
-        // Run plane fitting via pseudo-inverse least squares (Eq 5: a = W^+ p^z)
-        // Only update continuous terrain plane when FSM is not actively negotiating discontinuous obstacles
-        if (!task_controller_->isActive()) {
-            terrain_estimator_->update(contact_points_world, contact_valid);
-        }
-
         // ============================================================
         // Phase 5: Driving Controller (with Bank Angle)
         // ============================================================
@@ -327,6 +321,13 @@ private:
         if (task_controller_->isActive()) {
             double fsm_vx = task_controller_->getForwardVelocityOverride();
             active_cmd_vel = Eigen::Vector3d(fsm_vx, 0.0, 0.0);
+        }
+
+        // Run plane fitting via pseudo-inverse least squares (Eq 5: a = W^+ p^z)
+        // Only update continuous terrain plane when FSM is not actively negotiating discontinuous obstacles
+        if (!task_controller_->isActive()) {
+            bool is_stopped = (active_cmd_vel.norm() < 1e-3);
+            terrain_estimator_->update(contact_points_world, contact_valid, is_stopped);
         }
 
         auto [target_steer, target_wheel] = driving_controller_->update(

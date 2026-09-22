@@ -21,7 +21,8 @@ void TerrainEstimator::reset() {
 
 void TerrainEstimator::update(
     const std::array<Eigen::Vector3d, NUM_LEGS>& contact_points,
-    const std::array<bool, NUM_LEGS>& contact_valid)
+    const std::array<bool, NUM_LEGS>& contact_valid,
+    bool is_stopped)
 {
     // Collect valid contact points
     std::vector<Eigen::Vector3d> valid_points;
@@ -40,22 +41,45 @@ void TerrainEstimator::update(
     }
 
     // Fit plane normal via SVD
-    Eigen::Vector3d normal = fitPlaneNormal(valid_points);
+    Eigen::Vector3d raw_normal = fitPlaneNormal(valid_points);
 
     // Ensure normal points upward (positive Z component)
-    if (normal.z() < 0.0) {
-        normal = -normal;
+    if (raw_normal.z() < 0.0) {
+        raw_normal = -raw_normal;
+    }
+
+    // Apply low-pass filter to prevent transient spikes from inducing latching
+    Eigen::Vector3d normal = raw_normal;
+    if (terrain_state_.is_valid) {
+        normal = (filter_alpha_ * raw_normal + (1.0 - filter_alpha_) * terrain_state_.normal).normalized();
+    }
+
+    // Compute overall slope angle: angle between terrain normal and world Z
+    Eigen::Vector3d world_up(0.0, 0.0, 1.0);
+    double cos_angle = std::clamp(normal.dot(world_up), -1.0, 1.0);
+    double slope_angle = std::acos(cos_angle);
+
+    // Anti-latch: when the robot is stopped, if the estimated slope is nearly flat
+    // (< 3.0 deg), snap to world up to prevent small sensor/backlash offsets from accumulating.
+    // On actual slopes (>= 3.0 deg, e.g. ramps, steps), preserve the full terrain slope
+    // so automatic leveling and balance control remain active while stationary.
+    const double FLAT_GROUND_THRESHOLD = 0.052; // ~3.0 deg
+    if (is_stopped && slope_angle < FLAT_GROUND_THRESHOLD) {
+        normal = world_up;
+        slope_angle = 0.0;
+    }
+
+    // Clamp slope angle to physical limit
+    if (slope_angle > max_slope_angle_) {
+        Eigen::Vector3d horizontal = (normal - normal.dot(world_up) * world_up).normalized();
+        normal = (std::cos(max_slope_angle_) * world_up + std::sin(max_slope_angle_) * horizontal).normalized();
+        slope_angle = max_slope_angle_;
     }
 
     // Compute terrain rotation matrix
     terrain_state_.normal   = normal;
     terrain_state_.rotation = normalToRotation(normal);
-
-    // Compute overall slope angle: angle between terrain normal and world Z
-    Eigen::Vector3d world_up(0.0, 0.0, 1.0);
-    double cos_angle = std::clamp(normal.dot(world_up), -1.0, 1.0);
-    terrain_state_.slope_angle = std::acos(cos_angle);
-
+    terrain_state_.slope_angle = slope_angle;
     terrain_state_.is_valid = true;
 }
 

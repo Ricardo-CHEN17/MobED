@@ -96,7 +96,13 @@ def main():
             if docker_addr is not None:
                 try:
                     state = get_joint_positions(model, data)
-                    sock.sendto(json.dumps({'state': state}).encode('utf-8'),
+                    chassis_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, 'chassis')
+                    imu_data = {
+                        'quat': [float(data.qpos[3]), float(data.qpos[4]), float(data.qpos[5]), float(data.qpos[6])], # [qw, qx, qy, qz]
+                        'omega': [float(data.qvel[3]), float(data.qvel[4]), float(data.qvel[5])],
+                        'acc': [float(data.cacc[chassis_id][3]), float(data.cacc[chassis_id][4]), float(data.cacc[chassis_id][5])]
+                    }
+                    sock.sendto(json.dumps({'state': state, 'imu': imu_data}).encode('utf-8'),
                                 docker_addr)
                 except Exception:
                     pass

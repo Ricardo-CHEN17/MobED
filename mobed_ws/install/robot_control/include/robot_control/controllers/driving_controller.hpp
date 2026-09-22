@@ -13,13 +13,11 @@ struct DrivingControllerParams {
     double max_wheel_accel = 10.0; // rad/s^2
     double max_steer_vel = 5.0;    // rad/s
 
-    // ---- Steering Constraint (geometric anti-collision) ----
-    // Eccentric arm angle beyond which it is considered tucked inwards
-    double ecc_collision_threshold = 0.5; // rad
-    
-    // Minimum clearance angle between steering direction and eccentric arm
-    // to prevent the wheel from hitting the chassis
-    double steer_ecc_clearance = 0.35;  // rad (~20 deg)
+    // ---- Steering Constraint (geometric anti-collision Section III.D) ----
+    // Maximum allowable steering angle towards the inward (chassis) direction
+    double max_inward_steer_angle = 1.15;   // rad (~66 deg)
+    // Maximum allowable steering angle towards the outward direction
+    double max_outward_steer_angle = 1.57;  // rad (90 deg)
 
     // ---- Bank Angle Calculator (Eq 8 in paper) ----
     // Maximum allowable bank angle (roll induced by centripetal force)
@@ -65,7 +63,7 @@ public:
      */
     double getBankAngle() const { return filtered_bank_angle_; }
 
-    void reset() { initialized_ = false; filtered_bank_angle_ = 0.0; }
+    void reset() { initialized_ = false; filtered_bank_angle_ = 0.0; zero_cmd_duration_ = 0.0; }
 
 private:
     DrivingControllerParams params_;
@@ -76,6 +74,7 @@ private:
 
     bool initialized_ = false;
     double filtered_bank_angle_ = 0.0;  // smoothed bank angle output
+    double zero_cmd_duration_ = 0.0;    // duration in seconds for which cmd_vel has been ~0
 
     /**
      * @brief Steering Constraint Function (Section III.D in paper)

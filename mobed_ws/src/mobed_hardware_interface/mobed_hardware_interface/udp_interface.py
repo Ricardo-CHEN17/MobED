@@ -16,7 +16,7 @@ Joint ordering (both directions):
 
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import JointState
+from sensor_msgs.msg import JointState, Imu
 import socket
 import json
 import time
@@ -45,6 +45,7 @@ class UdpInterfaceNode(Node):
 
         # ---------- ROS2 pub / sub ----------
         self.pub_states = self.create_publisher(JointState, '/joint_states', 10)
+        self.pub_imu = self.create_publisher(Imu, '/imu', 10)
         self.sub_cmds = self.create_subscription(
             JointState, '/mobed/joint_commands', self._cmd_callback, 10)
 
@@ -93,8 +94,9 @@ class UdpInterfaceNode(Node):
     # Upstream: Mac  -->  UDP JSON  -->  ROS2 /joint_states
     # ------------------------------------------------------------------
     def _poll_udp(self):
-        """Drain all pending UDP packets; publish the latest one as /joint_states."""
+        """Drain all pending UDP packets; publish the latest state and IMU."""
         latest_state = None
+        latest_imu = None
 
         # Drain — always consume everything so the buffer never grows stale
         while True:
@@ -103,6 +105,8 @@ class UdpInterfaceNode(Node):
                 parsed = json.loads(data.decode('utf-8'))
                 if 'state' in parsed and len(parsed['state']) == 12:
                     latest_state = parsed['state']
+                if 'imu' in parsed and isinstance(parsed['imu'], dict):
+                    latest_imu = parsed['imu']
             except BlockingIOError:
                 break  # nothing left in buffer
             except (json.JSONDecodeError, UnicodeDecodeError):
@@ -116,6 +120,8 @@ class UdpInterfaceNode(Node):
         if latest_state is not None:
             self.last_recv_time = now
             self._publish_joint_states(latest_state)
+            if latest_imu is not None:
+                self._publish_imu(latest_imu)
         elif (now - self.last_recv_time) > WATCHDOG_TIMEOUT:
             # Watchdog triggered — publish safe zeros so control node doesn't
             # drive blindly with stale data
@@ -132,6 +138,32 @@ class UdpInterfaceNode(Node):
         js.velocity = [0.0] * 12
         js.effort = [0.0] * 12
         self.pub_states.publish(js)
+
+    def _publish_imu(self, imu_dict: dict):
+        imu_msg = Imu()
+        imu_msg.header.stamp = self.get_clock().now().to_msg()
+        imu_msg.header.frame_id = 'base_link'
+
+        quat = imu_dict.get('quat', [1.0, 0.0, 0.0, 0.0])  # [qw, qx, qy, qz]
+        if len(quat) == 4:
+            imu_msg.orientation.w = float(quat[0])
+            imu_msg.orientation.x = float(quat[1])
+            imu_msg.orientation.y = float(quat[2])
+            imu_msg.orientation.z = float(quat[3])
+
+        omega = imu_dict.get('omega', [0.0, 0.0, 0.0])
+        if len(omega) == 3:
+            imu_msg.angular_velocity.x = float(omega[0])
+            imu_msg.angular_velocity.y = float(omega[1])
+            imu_msg.angular_velocity.z = float(omega[2])
+
+        acc = imu_dict.get('acc', [0.0, 0.0, 0.0])
+        if len(acc) == 3:
+            imu_msg.linear_acceleration.x = float(acc[0])
+            imu_msg.linear_acceleration.y = float(acc[1])
+            imu_msg.linear_acceleration.z = float(acc[2])
+
+        self.pub_imu.publish(imu_msg)
 
 
 def main(args=None):

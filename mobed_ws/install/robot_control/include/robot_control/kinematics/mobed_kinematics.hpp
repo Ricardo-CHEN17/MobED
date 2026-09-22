@@ -89,14 +89,16 @@ public:
      */
     const MobedParameters& getParams() const { return params_; }
 
+    /**
+     * @brief Utility to normalize angle to [-pi, pi]
+     */
+    double normalize_angle(double angle) const;
+
 private:
     MobedParameters params_;
     
     // Enumeration for leg indices
     enum LegIndex { FL = 0, FR = 1, RL = 2, RR = 3 };
-    
-    // Utility to normalize angle to [-pi, pi]
-    double normalize_angle(double angle) const;
 };
 
 } // namespace kinematics

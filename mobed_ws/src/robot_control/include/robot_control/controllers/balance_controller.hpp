@@ -47,6 +47,11 @@ struct BalanceControllerParams {
     // ---- IK position PD gains for tau_ik in Eq 9 ----
     double kp_ik = 150.0;      // Nm/rad
     double kd_ik = 15.0;       // Nm·s/rad
+
+    // ---- Admittance / Compliance parameters (Section III.E & III.F) ----
+    // Complies with dynamic disturbance force: delta_f_z = f_z - (m*g/4)
+    double compliance_k = 1000.0;       // N/rad (admittance stiffness: delta_q = w_grf * delta_f_z / compliance_k)
+    double max_compliance_shift = 0.35; // rad (~20 deg), maximum compliance adjustment
 };
 
 class BalanceController {
@@ -96,6 +101,7 @@ public:
 
 private:
     BalanceControllerParams params_;
+    RobotParams robot_params_;
     std::shared_ptr<kinematics::MobedKinematics> kinematics_;
 
     // Dynamics modules

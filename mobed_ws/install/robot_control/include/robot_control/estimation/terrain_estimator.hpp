@@ -29,9 +29,11 @@ public:
      *
      * @param contact_points  Array of 4 contact positions in world frame
      * @param contact_valid   Array of 4 booleans indicating which legs are in contact
+     * @param is_stopped      Whether robot is stationary (applies anti-latch flat decay)
      */
     void update(const std::array<Eigen::Vector3d, NUM_LEGS>& contact_points,
-                const std::array<bool, NUM_LEGS>& contact_valid);
+                const std::array<bool, NUM_LEGS>& contact_valid,
+                bool is_stopped = false);
 
     /**
      * @brief Get the current terrain state.
@@ -47,6 +49,9 @@ public:
 private:
     RobotParams params_;
     TerrainState terrain_state_;
+
+    double filter_alpha_ = 0.08;        // LPF smoothing coefficient for normal vector
+    double max_slope_angle_ = 0.2618;   // rad (~15 deg), maximum allowed terrain slope angle
 
     /**
      * @brief Fit a plane to a set of 3D points using SVD.
