@@ -1,0 +1,259 @@
+<mujoco model="mobed_playground">
+  <compiler angle="radian" eulerseq="xyz" autolimits="true" balanceinertia="true" boundinertia="1e-8" />
+
+  <default>
+    <joint armature="0.1" damping="1.0" />
+  </default>
+
+  <asset>
+    <mesh name="part_001_solid_001" file="meshes/part_001_solid_001.stl" scale="0.001 0.001 0.001" />
+    <mesh name="part_002_solid_002" file="meshes/part_002_solid_002.stl" scale="0.001 0.001 0.001" />
+    <mesh name="part_003_solid_003" file="meshes/part_003_solid_003.stl" scale="0.001 0.001 0.001" />
+    <mesh name="part_004_solid_004" file="meshes/part_004_solid_004.stl" scale="0.001 0.001 0.001" />
+    <mesh name="part_007_solid_007" file="meshes/part_007_solid_007.stl" scale="0.001 0.001 0.001" />
+    <mesh name="part_010_solid_010" file="meshes/part_010_solid_010.stl" scale="0.001 0.001 0.001" />
+    <mesh name="part_013_solid_013" file="meshes/part_013_solid_013.stl" scale="0.001 0.001 0.001" />
+    <mesh name="part_005_solid_005" file="meshes/part_005_solid_005.stl" scale="0.001 0.001 0.001" />
+    <mesh name="part_008_solid_008" file="meshes/part_008_solid_008.stl" scale="0.001 0.001 0.001" />
+    <mesh name="part_011_solid_011" file="meshes/part_011_solid_011.stl" scale="0.001 0.001 0.001" />
+    <mesh name="part_006_solid_006" file="meshes/part_006_solid_006.stl" scale="0.001 0.001 0.001" />
+    <mesh name="part_009_solid_009" file="meshes/part_009_solid_009.stl" scale="0.001 0.001 0.001" />
+    <mesh name="part_012_solid_012" file="meshes/part_012_solid_012.stl" scale="0.001 0.001 0.001" />
+
+    <texture name="grid" type="2d" builtin="checker" width="512" height="512" rgb1="0.92 0.93 0.95" rgb2="0.84 0.86 0.88" />
+    <material name="grid_mat" texture="grid" texrepeat="16 16" reflectance="0.05" />
+  </asset>
+
+  <worldbody>
+    <!-- Lighting -->
+    <light name="sun" pos="0 0 8" dir="0 0 -1" diffuse="0.8 0.8 0.8" specular="0.2 0.2 0.2" castshadow="true" />
+    <light name="fill_light1" pos="5 5 4" dir="-1 -1 -0.8" diffuse="0.4 0.4 0.4" specular="0.1 0.1 0.1" />
+    <light name="fill_light2" pos="-5 -5 4" dir="1 1 -0.8" diffuse="0.4 0.4 0.4" specular="0.1 0.1 0.1" />
+
+    <camera name="track_cam" mode="trackcom" pos="-1.5 0 0.8" xyaxes="0 -1 0 0.8 0 1.5" />
+    <camera name="overview_cam" pos="0 -10 9" xyaxes="1 0 0 0 0.7 0.7" />
+
+    <!-- Main Floor (16m x 16m) -->
+    <geom name="floor" type="plane" size="8 8 0.1" material="grid_mat" contype="1" conaffinity="1" friction="1 0.005 0.0001" />
+
+    <!-- Perimeter Boundary Walls -->
+    <geom name="wall_n" type="box" size="0.1 8.0 0.3" pos="8.0 0 0.3" rgba="0.55 0.6 0.65 0.7" contype="1" conaffinity="1" />
+    <geom name="wall_s" type="box" size="0.1 8.0 0.3" pos="-8.0 0 0.3" rgba="0.55 0.6 0.65 0.7" contype="1" conaffinity="1" />
+    <geom name="wall_e" type="box" size="8.0 0.1 0.3" pos="0 8.0 0.3" rgba="0.55 0.6 0.65 0.7" contype="1" conaffinity="1" />
+    <geom name="wall_w" type="box" size="8.0 0.1 0.3" pos="0 -8.0 0.3" rgba="0.55 0.6 0.65 0.7" contype="1" conaffinity="1" />
+
+    <!-- Central Staging Area Decal/Pad -->
+    <geom name="plaza_pad" type="box" size="2.0 2.0 0.001" pos="0 0 0.001" rgba="0.78 0.82 0.86 1" contype="0" conaffinity="0" />
+
+    <!-- =================================================================== -->
+    <!-- ZONE 1: 斜坡与调平测试区 (+X: X in [2.5, 7.5])                       -->
+    <!-- =================================================================== -->
+    <!-- Zone 1 Ground Pad -->
+    <geom name="z1_pad" type="box" size="2.6 1.8 0.001" pos="5.0 0 0.001" rgba="0.88 0.82 0.72 1" contype="0" conaffinity="0" />
+
+    <!-- Track 1A: 纵向 10.2° 爬坡测试道 (Y = 0.8m) -->
+    <!-- 上坡 (run=1.8m, rise=0.32m, slope=10.08°, length=1.828m) -->
+    <geom name="z1_ramp_up" type="box" size="0.914 0.6 0.02" pos="3.4 0.8 0.16" euler="0 -0.176 0"
+          rgba="0.85 0.68 0.45 1" contype="1" conaffinity="1" friction="1.2 0.005 0.0001" />
+    <!-- 坡顶高台 (run=1.4m, height=0.32m) -->
+    <geom name="z1_plateau" type="box" size="0.7 0.6 0.16" pos="5.0 0.8 0.16"
+          rgba="0.8 0.62 0.38 1" contype="1" conaffinity="1" friction="1.2 0.005 0.0001" />
+    <!-- 下坡 (run=1.8m, drop=0.32m, slope=10.08°) -->
+    <geom name="z1_ramp_down" type="box" size="0.914 0.6 0.02" pos="6.6 0.8 0.16" euler="0 0.176 0"
+          rgba="0.85 0.68 0.45 1" contype="1" conaffinity="1" friction="1.2 0.005 0.0001" />
+
+    <!-- Track 1B: 侧向 9.5° 横滚倾斜道 (Y = -0.8m, length=5.0m, width=1.3m) -->
+    <geom name="z1_side_bank" type="box" size="2.5 0.65 0.02" pos="5.0 -0.8 0.12" euler="0.165 0 0"
+          rgba="0.82 0.72 0.52 1" contype="1" conaffinity="1" friction="1.2 0.005 0.0001" />
+
+    <!-- =================================================================== -->
+    <!-- ZONE 2: 台阶与路肩越障区 (+Y: Y in [2.5, 7.5])                       -->
+    <!-- =================================================================== -->
+    <!-- Zone 2 Ground Pad -->
+    <geom name="z2_pad" type="box" size="1.8 2.6 0.001" pos="0 5.0 0.001" rgba="0.72 0.78 0.88 1" contype="0" conaffinity="0" />
+
+    <!-- Lane 2A: 5cm 低矮路肩 (X = -1.2m, Y in [3.0, 5.0]) -->
+    <geom name="z2_curb_5cm" type="box" size="0.45 1.0 0.025" pos="-1.2 4.0 0.025"
+          rgba="0.45 0.55 0.75 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
+    <!-- 5cm 后方缓坡下台阶 -->
+    <geom name="z2_curb_5cm_ramp" type="box" size="0.45 0.4 0.015" pos="-1.2 5.4 0.025" euler="0.062 0 0"
+          rgba="0.5 0.6 0.8 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
+
+    <!-- Lane 2B: 7.5cm 中度路肩 (X = 0.0m, Y in [3.0, 5.0]) - 对应偏心臂长度 -->
+    <geom name="z2_curb_75mm" type="box" size="0.45 1.0 0.0375" pos="0.0 4.0 0.0375"
+          rgba="0.35 0.45 0.7 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
+    <!-- 7.5cm 后方缓坡下台阶 -->
+    <geom name="z2_curb_75mm_ramp" type="box" size="0.45 0.5 0.015" pos="0.0 5.5 0.0375" euler="0.075 0 0"
+          rgba="0.4 0.5 0.75 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
+
+    <!-- Lane 2C: 连续双阶梯 (X = 1.2m) - 1阶 5cm, 2阶 10cm -->
+    <geom name="z2_stair_step1" type="box" size="0.45 0.5 0.025" pos="1.2 3.5 0.025"
+          rgba="0.3 0.4 0.65 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
+    <geom name="z2_stair_step2" type="box" size="0.45 0.6 0.05" pos="1.2 4.6 0.05"
+          rgba="0.25 0.35 0.6 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
+    <!-- 10cm 缓坡下台阶 -->
+    <geom name="z2_stair_ramp" type="box" size="0.45 0.6 0.02" pos="1.2 5.8 0.05" euler="0.083 0 0"
+          rgba="0.35 0.45 0.7 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
+
+    <!-- =================================================================== -->
+    <!-- ZONE 3: 减速带与非对称起伏路面 (-X: X in [-7.5, -2.5])              -->
+    <!-- =================================================================== -->
+    <!-- Zone 3 Ground Pad -->
+    <geom name="z3_pad" type="box" size="2.6 1.8 0.001" pos="-5.0 0 0.001" rgba="0.88 0.75 0.72 1" contype="0" conaffinity="0" />
+
+    <!-- Track 3A: 连续减速带 (Y = 0.8m) - 半圆柱凸起 (r=3.5cm, width=1.2m) -->
+    <geom name="z3_bump1" type="cylinder" size="0.035 0.55" pos="-3.2 0.8 0.015" euler="1.5708 0 0"
+          rgba="0.9 0.3 0.2 1" contype="1" conaffinity="1" friction="1.2 0.005 0.0001" />
+    <geom name="z3_bump2" type="cylinder" size="0.035 0.55" pos="-3.8 0.8 0.015" euler="1.5708 0 0"
+          rgba="0.9 0.3 0.2 1" contype="1" conaffinity="1" friction="1.2 0.005 0.0001" />
+    <geom name="z3_bump3" type="cylinder" size="0.035 0.55" pos="-4.6 0.8 0.015" euler="1.5708 0 0"
+          rgba="0.9 0.3 0.2 1" contype="1" conaffinity="1" friction="1.2 0.005 0.0001" />
+    <geom name="z3_bump4" type="cylinder" size="0.035 0.55" pos="-5.6 0.8 0.015" euler="1.5708 0 0"
+          rgba="0.9 0.3 0.2 1" contype="1" conaffinity="1" friction="1.2 0.005 0.0001" />
+    <geom name="z3_bump5" type="cylinder" size="0.035 0.55" pos="-6.8 0.8 0.015" euler="1.5708 0 0"
+          rgba="0.9 0.3 0.2 1" contype="1" conaffinity="1" friction="1.2 0.005 0.0001" />
+
+    <!-- Track 3B: 左右非对称交错颠簸路 (Y = -0.8m) - 考核导纳悬挂滤波 -->
+    <!-- 左轮颠簸块 (Y = -0.55m) -->
+    <geom name="z3_cobble_L1" type="box" size="0.15 0.15 0.015" pos="-3.2 -0.55 0.015"
+          rgba="0.8 0.4 0.3 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
+    <geom name="z3_cobble_L2" type="box" size="0.15 0.15 0.015" pos="-4.2 -0.55 0.015"
+          rgba="0.8 0.4 0.3 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
+    <geom name="z3_cobble_L3" type="box" size="0.15 0.15 0.018" pos="-5.2 -0.55 0.018"
+          rgba="0.8 0.4 0.3 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
+    <geom name="z3_cobble_L4" type="box" size="0.15 0.15 0.015" pos="-6.2 -0.55 0.015"
+          rgba="0.8 0.4 0.3 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
+
+    <!-- 右轮颠簸块 (Y = -1.05m) - 错位布置 -->
+    <geom name="z3_cobble_R1" type="box" size="0.15 0.15 0.015" pos="-3.7 -1.05 0.015"
+          rgba="0.75 0.35 0.25 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
+    <geom name="z3_cobble_R2" type="box" size="0.15 0.15 0.018" pos="-4.7 -1.05 0.018"
+          rgba="0.75 0.35 0.25 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
+    <geom name="z3_cobble_R3" type="box" size="0.15 0.15 0.015" pos="-5.7 -1.05 0.015"
+          rgba="0.75 0.35 0.25 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
+    <geom name="z3_cobble_R4" type="box" size="0.15 0.15 0.015" pos="-6.7 -1.05 0.015"
+          rgba="0.75 0.35 0.25 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
+
+    <!-- =================================================================== -->
+    <!-- ZONE 4: 连续绕桩与向心倾角弯道 (-Y: Y in [-7.5, -2.5])              -->
+    <!-- =================================================================== -->
+    <!-- Zone 4 Ground Pad -->
+    <geom name="z4_pad" type="box" size="1.8 2.6 0.001" pos="0 -5.0 0.001" rgba="0.72 0.85 0.75 1" contype="0" conaffinity="0" />
+
+    <!-- 绕桩桩桶 (沿 X=0 轴线性排列，间距 1.1m) -->
+    <geom name="z4_pylon1" type="cylinder" size="0.06 0.25" pos="0 -3.2 0.25"
+          rgba="1.0 0.45 0.0 1" contype="1" conaffinity="1" />
+    <geom name="z4_pylon1_ring" type="cylinder" size="0.065 0.04" pos="0 -3.2 0.25"
+          rgba="1.0 1.0 1.0 1" contype="0" conaffinity="0" />
+
+    <geom name="z4_pylon2" type="cylinder" size="0.06 0.25" pos="0 -4.3 0.25"
+          rgba="1.0 0.45 0.0 1" contype="1" conaffinity="1" />
+    <geom name="z4_pylon2_ring" type="cylinder" size="0.065 0.04" pos="0 -4.3 0.25"
+          rgba="1.0 1.0 1.0 1" contype="0" conaffinity="0" />
+
+    <geom name="z4_pylon3" type="cylinder" size="0.06 0.25" pos="0 -5.4 0.25"
+          rgba="1.0 0.45 0.0 1" contype="1" conaffinity="1" />
+    <geom name="z4_pylon3_ring" type="cylinder" size="0.065 0.04" pos="0 -5.4 0.25"
+          rgba="1.0 1.0 1.0 1" contype="0" conaffinity="0" />
+
+    <geom name="z4_pylon4" type="cylinder" size="0.06 0.25" pos="0 -6.5 0.25"
+          rgba="1.0 0.45 0.0 1" contype="1" conaffinity="1" />
+    <geom name="z4_pylon4_ring" type="cylinder" size="0.065 0.04" pos="0 -6.5 0.25"
+          rgba="1.0 1.0 1.0 1" contype="0" conaffinity="0" />
+
+    <!-- 侧方倾角弯道平台 (Banked Corner Pad: X=1.1m, Y=-5.0m, 内倾 6°) -->
+    <geom name="z4_banked_curve" type="box" size="0.65 2.2 0.015" pos="1.1 -5.0 0.045" euler="0 -0.105 0"
+          rgba="0.55 0.75 0.6 1" contype="1" conaffinity="1" friction="1.2 0.005 0.0001" />
+
+    <!-- =================================================================== -->
+    <!-- ROBOT CHASSIS & MECHANISM                                           -->
+    <!-- =================================================================== -->
+    <body name="chassis" pos="0 0 0">
+      <freejoint name="root" />
+      <inertial pos="0.0019047851 0 0.049093719" mass="14.996783" quat="1 0 0 0" diaginertia="0.20788229 0.20788229 0.39976801" />
+      
+      <geom name="front_nose" type="box" size="0.16 0.05 0.02" pos="0.15 0 0.05" rgba="1 0 0 1" contype="0" conaffinity="0" />
+
+      <geom name="chassis_mesh_1" type="mesh" mesh="part_001_solid_001" pos="0 0.0090937195 0.0019047852" euler="0 0 0" group="1" contype="0" conaffinity="0" />
+      <body name="Steering_joint_LF" pos="0.15190479 0.15 0.0090937195" euler="0 0 1.5707963">
+        <joint name="Steering_joint_LF" type="hinge" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-200 200" actuatorfrclimited="true" />
+        <inertial pos="0.0016718354 -2.1252266e-06 -0.028065513" mass="1.536995" quat="0.9981442 4.7558172e-05 0.060894316 -0.00020962731" diaginertia="0.00097712 0.00109524 0.00130314" />
+        <geom name="Steering_joint_LF_mesh_1" type="mesh" mesh="part_002_solid_002" rgba="1 0.2 0.2 1" pos="-0.14090628 0.15190479 -0.0071889343" euler="0 0 -1.5707963" group="1" contype="0" conaffinity="0" />
+        <body name="Posture_control_joint_LF" pos="0.046069665 0 -0.045" euler="-1.5707963 -1.5707963 0">
+          <joint name="Posture_control_joint_LF" type="hinge" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-200 200" actuatorfrclimited="true" />
+          <inertial pos="-0.035491101 -0.01210916 -0.013991309" mass="1.061999" quat="0.98651643 0 0 0.16366223" diaginertia="0.00008364 0.00087668 0.00094262" />
+          <geom name="Posture_control_joint_LF_mesh_1" type="mesh" mesh="part_003_solid_003" pos="0.15190479 -0.037811066 0.18697595" euler="1.5707963 0 -3.1415927" group="1" contype="0" conaffinity="0" />
+          <body name="Wheel_joint_LF" pos="-0.070982202 -0.02421832 -0.018991302" euler="3.1415927 0 0">
+            <joint name="Wheel_joint_LF" type="hinge" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-200 200" actuatorfrclimited="true" />
+            <inertial pos="1.2736975e-10 0 0.010000008" mass="0.75153473" quat="0.99861458 0 0 0.052620487" diaginertia="0.0018977931 0.001897793 0.0037454838" />
+            <geom name="Wheel_joint_LF_mesh_1" type="mesh" mesh="part_004_solid_004" pos="0.22288699 0.013592745 -0.20596725" euler="-1.5707963 0 -3.1415927" group="1" contype="1" conaffinity="1" friction="1 0.005 0.0001" />
+          </body>
+        </body>
+      </body>
+      <body name="Steering_joint_RF" pos="0.15190479 -0.15 0.0090937195" euler="0 0 1.5707963">
+        <joint name="Steering_joint_RF" type="hinge" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-200 200" actuatorfrclimited="true" />
+        <inertial pos="-0.0016718342 2.12478e-06 -0.028065513" mass="1.536995" quat="0.9981442 -4.7530235e-05 -0.060894308 -0.00020965858" diaginertia="0.00097712 0.00109524 0.00130314" />
+        <geom name="Steering_joint_RF_mesh_1" type="mesh" mesh="part_007_solid_007" rgba="0.2 1 0.2 1" pos="0.15909372 0.15190479 -0.0071889343" euler="0 0 -1.5707963" group="1" contype="0" conaffinity="0" />
+        <body name="Posture_control_joint_RF" pos="-0.060060967 0 -0.045" euler="1.5707963 1.5707963 0">
+          <joint name="Posture_control_joint_RF" type="hinge" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-200 200" actuatorfrclimited="true" />
+          <inertial pos="0.0033361432 0.037351307 -7.573517e-09" mass="1.061999" quat="0.99900822 0 0 -0.044526062" diaginertia="0.00087668 0.00008364 0.00094262" />
+          <geom name="Posture_control_joint_RF_mesh_1" type="mesh" mesh="part_010_solid_010" pos="0.15190479 0.037811066 0.21915469" euler="-1.5707963 0 -3.1415927" group="1" contype="0" conaffinity="0" />
+          <body name="Wheel_joint_RF" pos="0.0066722838 0.074702615 -0.005" euler="-3.1415927 0 0">
+            <joint name="Wheel_joint_RF" type="hinge" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-200 200" actuatorfrclimited="true" />
+            <inertial pos="-9.5305775e-10 -3.2682827e-10 0.010000008" mass="0.75153475" quat="0.93536482 0 0 -0.3536844" diaginertia="0.0018977931 0.0018977931 0.003745484" />
+            <geom name="Wheel_joint_RF_mesh_1" type="mesh" mesh="part_013_solid_013" pos="0.1452325 0.036891549 -0.22415469" euler="1.5707963 0 -3.1415927" group="1" contype="1" conaffinity="1" friction="1 0.005 0.0001" />
+          </body>
+        </body>
+      </body>
+      <body name="Steering_joint_LB" pos="-0.14809521 0.15 0.0090937195" euler="0 0 1.5707963">
+        <joint name="Steering_joint_LB" type="hinge" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-200 200" actuatorfrclimited="true" />
+        <inertial pos="0.0016718342 -2.1248272e-06 -0.028065513" mass="1.536995" quat="0.9981442 4.7518247e-05 0.060894305 -0.00020975219" diaginertia="0.00097712 0.00109524 0.00130314" />
+        <geom name="Steering_joint_LB_mesh_1" type="mesh" mesh="part_005_solid_005" pos="-0.14090628 -0.14809521 -0.0071889343" euler="0 0 -1.5707963" group="1" contype="0" conaffinity="0" />
+        <body name="Posture_control_joint_LB" pos="0.060060967 0 -0.045" euler="-1.5707963 -1.5707963 0">
+          <joint name="Posture_control_joint_LB" type="hinge" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-200 200" actuatorfrclimited="true" />
+          <inertial pos="0.037472079 0.0014468008 -7.5886705e-09" mass="1.061999" quat="0.99981385 0 0 0.019294275" diaginertia="0.00008364 0.00087668 0.00094262" />
+          <geom name="Posture_control_joint_LB_mesh_1" type="mesh" mesh="part_008_solid_008" pos="-0.14809521 -0.037811066 0.20096725" euler="1.5707963 0 -3.1415927" group="1" contype="0" conaffinity="0" />
+          <body name="Wheel_joint_LB" pos="0.07494416 0.0028936022 -0.005" euler="3.1415927 0 0">
+            <joint name="Wheel_joint_LB" type="hinge" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-200 200" actuatorfrclimited="true" />
+            <inertial pos="0 4.5386143e-10 0.010000008" mass="0.75153474" quat="0.93171755 0 0 -0.36318371" diaginertia="0.0018977931 0.001897793 0.0037454838" />
+            <geom name="Wheel_joint_LB_mesh_1" type="mesh" mesh="part_011_solid_011" pos="-0.22303937 0.040704668 -0.20596725" euler="-1.5707963 0 -3.1415927" group="1" contype="1" conaffinity="1" friction="1 0.005 0.0001" />
+          </body>
+        </body>
+      </body>
+      <body name="Steering_joint_RB" pos="-0.14809521 -0.15 0.0090937195" euler="0 0 1.5707963">
+        <joint name="Steering_joint_RB" type="hinge" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-200 200" actuatorfrclimited="true" />
+        <inertial pos="-0.0016718354 2.1246811e-06 -0.028065513" mass="1.536995" quat="0.9981442 -4.756718e-05 -0.06089431 -0.00020963633" diaginertia="0.00097712 0.00109524 0.00130314" />
+        <geom name="Steering_joint_RB_mesh_1" type="mesh" mesh="part_006_solid_006" pos="0.15909372 -0.14809521 -0.0071889343" euler="0 0 -1.5707963" group="1" contype="0" conaffinity="0" />
+        <body name="Posture_control_joint_RB" pos="-0.060060967 0 -0.045" euler="1.5707963 1.5707963 0">
+          <joint name="Posture_control_joint_RB" type="hinge" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-200 200" actuatorfrclimited="true" />
+          <inertial pos="0.0035230026 0.037334146 -7.5735161e-09" mass="1.061999" quat="0.99889369 0 0 -0.047025398" diaginertia="0.00087668 0.00008364 0.00094262" />
+          <geom name="Posture_control_joint_RB_mesh_1" type="mesh" mesh="part_009_solid_009" pos="-0.14809521 0.037811066 0.21915469" euler="-1.5707963 0 -3.1415927" group="1" contype="0" conaffinity="0" />
+          <body name="Wheel_joint_RB" pos="0.0070460026 0.074668292 -0.005" euler="-3.1415927 0 0">
+            <joint name="Wheel_joint_RB" type="hinge" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-200 200" actuatorfrclimited="true" />
+            <inertial pos="-1.2465447e-09 -5.7382597e-10 0.010000008" mass="0.75153475" quat="0.99454652 0 0 -0.10429394" diaginertia="0.0018977932 0.0018977931 0.003745484" />
+            <geom name="Wheel_joint_RB_mesh_1" type="mesh" mesh="part_012_solid_012" pos="-0.15514122 0.036857226 -0.22415469" euler="1.5707963 0 -3.1415927" group="1" contype="1" conaffinity="1" friction="1 0.005 0.0001" />
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <keyframe>
+    <key name="home" qpos="0 0 0.35 1 0 0 0 -0.0000 -1.9164 -3.5443 0.1599 -3.0159 1.8035 -0.0013 1.5080 4.1867 -0.0069 -3.0474 -0.7472" />
+  </keyframe>
+
+  <actuator>
+    <position name="act_steer_FL" joint="Steering_joint_LF" kp="300" kv="30" ctrllimited="true" ctrlrange="-3.14 3.14" />
+    <position name="act_steer_FR" joint="Steering_joint_RF" kp="300" kv="30" ctrllimited="true" ctrlrange="-3.14 3.14" />
+    <position name="act_steer_RL" joint="Steering_joint_LB" kp="300" kv="30" ctrllimited="true" ctrlrange="-3.14 3.14" />
+    <position name="act_steer_RR" joint="Steering_joint_RB" kp="300" kv="30" ctrllimited="true" ctrlrange="-3.14 3.14" />
+    <position name="act_ecc_FL" joint="Posture_control_joint_LF" kp="300" kv="30" ctrllimited="true" ctrlrange="-3.14 3.14" />
+    <position name="act_ecc_FR" joint="Posture_control_joint_RF" kp="300" kv="30" ctrllimited="true" ctrlrange="-3.14 3.14" />
+    <position name="act_ecc_RL" joint="Posture_control_joint_LB" kp="300" kv="30" ctrllimited="true" ctrlrange="-3.14 3.14" />
+    <position name="act_ecc_RR" joint="Posture_control_joint_RB" kp="300" kv="30" ctrllimited="true" ctrlrange="-3.14 3.14" />
+    <velocity name="act_wheel_FL" joint="Wheel_joint_LF" kv="10" ctrllimited="true" ctrlrange="-50 50" />
+    <velocity name="act_wheel_FR" joint="Wheel_joint_RF" kv="10" ctrllimited="true" ctrlrange="-50 50" />
+    <velocity name="act_wheel_RL" joint="Wheel_joint_LB" kv="10" ctrllimited="true" ctrlrange="-50 50" />
+    <velocity name="act_wheel_RR" joint="Wheel_joint_RB" kv="10" ctrllimited="true" ctrlrange="-50 50" />
+  </actuator>
+</mujoco>

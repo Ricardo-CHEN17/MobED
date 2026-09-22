@@ -23,7 +23,12 @@ import json
 import time
 import select
 
-XML_PATH = 'local_mtgvakn0_9w389c_mjcf_stl/robot.xml'
+import os
+import sys
+import argparse
+
+PLAYGROUND_XML = 'local_mtgvakn0_9w389c_mjcf_stl/robot_playground.xml'
+FLAT_XML = 'local_mtgvakn0_9w389c_mjcf_stl/robot.xml'
 UDP_PORT = 9000
 
 # Canonical joint names — same order as JOINT_NAMES in udp_interface.py
@@ -44,9 +49,23 @@ def get_joint_positions(model, data):
 
 
 def main():
+    parser = argparse.ArgumentParser(description='MuJoCo Simulation Runner for MobED')
+    parser.add_argument('--flat', action='store_true', help='Use flat ground scene (robot.xml)')
+    parser.add_argument('--model', type=str, default=None, help='Custom MJCF model path')
+    args = parser.parse_args()
+
+    if args.model:
+        xml_path = args.model
+    elif args.flat:
+        xml_path = FLAT_XML
+    elif os.path.exists(PLAYGROUND_XML):
+        xml_path = PLAYGROUND_XML
+    else:
+        xml_path = FLAT_XML
+
     # ---- Load model ----
-    print(f'Loading model: {XML_PATH}')
-    model = mujoco.MjModel.from_xml_path(XML_PATH)
+    print(f'Loading model: {xml_path}')
+    model = mujoco.MjModel.from_xml_path(xml_path)
     data = mujoco.MjData(model)
 
     # ---- Apply home keyframe ----
