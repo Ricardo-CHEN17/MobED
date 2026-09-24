@@ -18,8 +18,14 @@ struct BalanceControllerParams {
     double max_roll = 0.331;       // ~ 19 deg
     double max_pitch = 0.401;      // ~ 23 deg
 
-    double filter_alpha = 0.02;    // LPF coefficient for normal operation
-    double max_ecc_vel = 2.0;      // rad/s
+    double filter_alpha = 0.25;    // LPF coefficient for normal operation (tau = 80ms)
+    double max_ecc_vel = 2.5;      // rad/s
+
+    // ---- Fast Attitude Closed-Loop PD gains (direct IMU compensation) ----
+    double kp_attitude_roll  = 1.0;   // dimensionless scale on roll error [rad -> rad]
+    double kd_attitude_roll  = 0.08;  // damping scale on gyro wx [rad/s -> rad]
+    double kp_attitude_pitch = 1.0;   // dimensionless scale on pitch error [rad -> rad]
+    double kd_attitude_pitch = 0.08;  // damping scale on gyro wy [rad/s -> rad]
 
     // ---- Gain Scheduling (Paper Eq 16-17) ----
     // Controls the blend between dynamics-based torque (GRF) and
@@ -48,10 +54,14 @@ struct BalanceControllerParams {
     double kp_ik = 150.0;      // Nm/rad
     double kd_ik = 15.0;       // Nm·s/rad
 
-    // ---- Admittance / Compliance parameters (Section III.E & III.F) ----
-    // Complies with dynamic disturbance force: delta_f_z = f_z - (m*g/4)
-    double compliance_k = 1000.0;       // N/rad (admittance stiffness: delta_q = w_grf * delta_f_z / compliance_k)
-    double max_compliance_shift = 0.35; // rad (~20 deg), maximum compliance adjustment
+    // ---- Bilateral Admittance & Ground-Seeking Parameters (Phase 2.7) ----
+    double compliance_k             = 50.0; // Nm/rad (torque admittance stiffness for bump absorption)
+    double compliance_deadband      = 1.0;  // Nm (torque deadband to prevent micro-fluctuation jitter)
+    double max_compliance_shift     = 0.35; // rad (~20 deg), maximum upward compliance adjustment
+    double ground_seeking_k         = 30.0; // Nm/rad (downward admittance stiffness when wheel is airborne)
+    double ground_seeking_max_shift = 0.25; // rad (~14.3 deg), maximum downward ground-seeking extension
+    double compliance_filter_alpha  = 0.20; // dimensionless, normal IIR smoothing coefficient [0, 1]
+    double touch_loss_decay_alpha   = 0.45; // dimensionless, fast touch-loss recovery decay coefficient
 };
 
 class BalanceController {
@@ -90,10 +100,11 @@ public:
         double target_pitch,
         const Eigen::Vector4d& current_steer_angles,
         const Eigen::Vector4d& current_ecc_angles,
+        const Eigen::Vector4d& current_ecc_efforts,
         const BodyState& body_state,
         const std::array<Eigen::Vector3d, NUM_LEGS>& contact_points,
         const std::array<bool, NUM_LEGS>& contact_valid,
-        const Eigen::Matrix3d& R_T,
+        const TerrainState& terrain_state,
         double dt,
         bool e_stop_active = false);
 
@@ -110,9 +121,20 @@ private:
 
     Eigen::Vector4d prev_ecc_angles_;
     Eigen::Vector4d start_ecc_angles_;
+    Eigen::Vector4d prev_compliance_shift_;  // IIR filter state for virtual damping (Task 3.1)
+    mutable double prev_h_adapt_ = 0.18;     // IIR filter state for adaptive height smoothing
     bool initialized_ = false;
     double time_since_init_ = 0.0;
     const double STARTUP_DURATION = 3.0; // 3 seconds to smoothly stand up
+
+    /**
+     * @brief Compute slope-adaptive nominal height (Headroom Management).
+     *
+     * Automatically lowers nominal chassis height on slopes so that downhill legs
+     * do not exceed max_height (0.22m), enabling full bilateral leveling authority.
+     */
+    double computeAdaptiveNominalHeight(
+        double target_height, double pitch_slope, double roll_slope) const;
 
     /**
      * @brief Compute gain scheduling weights (Paper Eq 16-17).
@@ -138,6 +160,7 @@ private:
      */
     void computeDesiredAcceleration(
         double target_height, double target_roll, double target_pitch,
+        const Eigen::Vector4d& current_ecc_angles,
         const BodyState& body_state,
         Eigen::Vector3d& desired_linear_accel,
         Eigen::Vector3d& desired_angular_accel) const;

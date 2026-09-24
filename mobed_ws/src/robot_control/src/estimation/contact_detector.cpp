@@ -13,6 +13,8 @@ ContactDetector::ContactDetector(const RobotParams& params)
 
 void ContactDetector::reset() {
     impact_flags_.fill(false);
+    shock_window_timer_.fill(0.0);
+    sustain_timer_.fill(0.0);
     ecc_torque_rates_ = Eigen::Vector4d::Zero();
     wheel_torque_rates_ = Eigen::Vector4d::Zero();
     prev_ecc_efforts_ = Eigen::Vector4d::Zero();
@@ -63,6 +65,9 @@ double ContactDetector::computeSmoothedRate(
 void ContactDetector::update(
     const Eigen::Vector4d& ecc_efforts,
     const Eigen::Vector4d& wheel_efforts,
+    const Eigen::Vector4d& wheel_velocities,
+    double chassis_forward_vel,
+    double cmd_forward_vel,
     double dt)
 {
     if (dt <= 0.0 || dt > 0.5) return;
@@ -78,6 +83,14 @@ void ContactDetector::update(
     // Clear impact flags from previous cycle
     impact_flags_.fill(false);
 
+    // Chassis blockage gate:
+    // A true obstacle (>=5cm vertical stair) physically halts the robot's forward progress,
+    // causing forward chassis velocity to drop to near zero (vx < chassis_blocked_vel_threshold).
+    // If the chassis is still moving forward (vx > 0.06 m/s), the robot is simply rolling over
+    // a 2~3cm bump, thin board lip, or speed bump — suspension compliance absorbs it without climbing!
+    bool chassis_blocked = (cmd_forward_vel > 0.08) &&
+                           (chassis_forward_vel < params_.chassis_blocked_vel_threshold);
+
     for (int i = 0; i < NUM_LEGS; ++i) {
         // ============================================================
         // 1. Compute smoothed torque rates (dτ/dt)
@@ -89,21 +102,45 @@ void ContactDetector::update(
             wheel_effort_history_[i], wheel_efforts(i), dt);
 
         // ============================================================
-        // 2. Impact detection: rate-only check
+        // 2. Two-Stage Impact Detection (Shock Onset + Sustained Load):
         //
-        // An impact is flagged if the torque rate (dτ/dt) exceeds threshold.
-        // The paper states impacts are detected based on the rate of change
-        // of torque, not absolute torque.
-        //
-        // We check both eccentric and wheel joints, since the impact
-        // signature appears on both depending on the collision geometry.
+        // Stage 1 (Shock Onset):
+        // When a sudden transient spike in eccentric torque rate occurs,
+        // arm a 200 ms collision observation window.
         // ============================================================
+        if (std::abs(ecc_torque_rates_(i)) > params_.contact_torque_rate_threshold) {
+            shock_window_timer_[i] = params_.shock_window_duration;
+        }
 
-        bool rate_trigger_ecc   = std::abs(ecc_torque_rates_(i))   > params_.contact_torque_rate_threshold;
-        bool rate_trigger_wheel = std::abs(wheel_torque_rates_(i)) > params_.contact_torque_rate_threshold;
+        // ============================================================
+        // Stage 2 (Sustained Load Confirmation):
+        // While within the shock window, if:
+        //   1. The chassis forward progress is rigidly blocked (chassis_blocked)
+        //   2. The eccentric link experiences sustained resistive torque load (|τ_ecc| > contact_torque_threshold)
+        //   3. The drive wheel is truly stalled against a vertical face (|τ_wheel| > 8.0 Nm AND |ω_wheel| < 0.4 rad/s)
+        // accumulate the sustain confirmation timer.
+        //
+        // Once sustained for >= sustain_confirm_duration (0.18s / 9 frames),
+        // confirm the obstacle impact.
+        // ============================================================
+        if (shock_window_timer_[i] > 0.0) {
+            shock_window_timer_[i] = std::max(0.0, shock_window_timer_[i] - dt);
 
-        // Impact = rate on (ecc OR wheel)
-        impact_flags_[i] = (rate_trigger_ecc || rate_trigger_wheel);
+            bool ecc_loaded = (std::abs(ecc_efforts(i)) > params_.contact_torque_threshold);
+            bool wheel_stalled = (std::abs(wheel_efforts(i)) > params_.wheel_stall_torque_threshold) &&
+                                 (std::abs(wheel_velocities(i)) < params_.wheel_stall_vel_threshold);
+
+            if (chassis_blocked && ecc_loaded && wheel_stalled) {
+                sustain_timer_[i] += dt;
+                if (sustain_timer_[i] >= params_.sustain_confirm_duration) {
+                    impact_flags_[i] = true;
+                }
+            } else {
+                sustain_timer_[i] = std::max(0.0, sustain_timer_[i] - dt);
+            }
+        } else {
+            sustain_timer_[i] = 0.0;
+        }
     }
 
     // Store for next cycle

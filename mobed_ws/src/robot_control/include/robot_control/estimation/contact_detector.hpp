@@ -26,6 +26,7 @@ namespace estimation {
 class ContactDetector {
 public:
     explicit ContactDetector(const RobotParams& params = RobotParams());
+    virtual ~ContactDetector() = default;
 
     /**
      * @brief Feed new joint effort data and update detection state.
@@ -38,25 +39,35 @@ public:
      */
     void update(const Eigen::Vector4d& ecc_efforts,
                 const Eigen::Vector4d& wheel_efforts,
+                const Eigen::Vector4d& wheel_velocities,
+                double chassis_forward_vel,
+                double cmd_forward_vel,
                 double dt);
+
+    void update(const Eigen::Vector4d& ecc_efforts,
+                const Eigen::Vector4d& wheel_efforts,
+                const Eigen::Vector4d& wheel_velocities,
+                double dt) {
+        update(ecc_efforts, wheel_efforts, wheel_velocities, 0.0, 0.2, dt);
+    }
 
     /**
      * @brief Check if an impact was detected on any front leg.
      * @return true if FL or FR detected a collision this cycle
      */
-    bool frontImpactDetected() const;
+    virtual bool frontImpactDetected() const;
 
     /**
      * @brief Check if an impact was detected on any rear leg.
      * @return true if RL or RR detected a collision this cycle
      */
-    bool rearImpactDetected() const;
+    virtual bool rearImpactDetected() const;
 
     /**
      * @brief Get per-leg impact detection flags.
      * @return Array of 4 booleans [FL, FR, RL, RR]
      */
-    std::array<bool, NUM_LEGS> getImpactFlags() const { return impact_flags_; }
+    virtual std::array<bool, NUM_LEGS> getImpactFlags() const { return impact_flags_; }
 
     /**
      * @brief Get the smoothed torque rate (dτ/dt) for each eccentric joint.
@@ -78,6 +89,10 @@ private:
     // Smoothed torque rates
     Eigen::Vector4d ecc_torque_rates_;
     Eigen::Vector4d wheel_torque_rates_;
+
+    // Two-stage detection timers per leg
+    std::array<double, NUM_LEGS> shock_window_timer_;
+    std::array<double, NUM_LEGS> sustain_timer_;
 
     // Sliding window history for torque derivative computation
     static constexpr int WINDOW_SIZE = 5;

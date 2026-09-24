@@ -64,6 +64,7 @@ public:
         wheel_signs_ = {1.0, -1.0, 1.0, -1.0};
         ecc_offsets_ = {-1.9003, -3.0526, 1.5320, -3.0473};
 
+
         // ============================================================
         // ROS 2 Subscriptions
         // ============================================================
@@ -228,6 +229,19 @@ private:
                 curr_wheel_efforts_(3) = effort;
             }
         }
+
+        // On first arrival of real joint data, initialise the Unwrap tracking array
+        // from the actual received CAD angles, NOT from ecc_offsets_ (which maps to
+        // math angle = 0 and may differ from the MuJoCo home keyframe position).
+        if (!joints_initialized_) {
+            for (int i = 0; i < 4; ++i) {
+                // Back-convert the just-parsed math angle to CAD frame.
+                // curr_ecc_angles_(i) already holds (pos - offset) * sign, so:
+                //   cad = math * sign + offset
+                prev_cad_ecc_[i] = curr_ecc_angles_(i) * ecc_signs_[i] + ecc_offsets_[i];
+            }
+            joints_initialized_ = true;
+        }
     }
 
     // ================================================================
@@ -250,6 +264,7 @@ private:
         last_time_ = now;
 
         if (dt <= 0.0 || dt > 0.5) return;
+        if (!joints_initialized_) return;  // Wait for first real joint state before running any control
 
         // ============================================================
         // Phase 1: Homing Initialization
@@ -276,15 +291,100 @@ private:
         BodyState body_state = state_estimator_->getState();
 
         // ============================================================
-        // Phase 3: Contact Detection (torque monitoring)
+        // Phase 2.5: Terrain Estimation (Eq 4-6 in paper)
         // ============================================================
-        contact_detector_->update(curr_ecc_efforts_, curr_wheel_efforts_, dt);
+        std::array<Eigen::Vector3d, NUM_LEGS> foot_pos_in_base;
+        std::array<Eigen::Vector3d, NUM_LEGS> contact_points_world;
+        std::array<bool, NUM_LEGS> contact_valid = task_controller_->getContactValid();
+
+        Eigen::Vector3d base_pos = body_state.position;
+        Eigen::Matrix3d R_base = body_state.orientation.toRotationMatrix();
+
+        for (int i = 0; i < NUM_LEGS; ++i) {
+            foot_pos_in_base[i] = kinematics_->computeFootPositionInBase(
+                i, curr_steer_angles_(i), curr_ecc_angles_(i));
+            // p_C = p + R * ^B r_i (Eq 2) for srbd_model
+            contact_points_world[i] = base_pos + R_base * foot_pos_in_base[i];
+        }
+
+        Eigen::Vector3d active_cmd_vel = is_homing_ ? Eigen::Vector3d::Zero() : cmd_vel_;
+        if (task_controller_->isActive()) {
+            double fsm_vx = task_controller_->getForwardVelocityOverride();
+            active_cmd_vel = Eigen::Vector3d(fsm_vx, 0.0, 0.0);
+        }
+
+        // Real-Time Contact Force Verification (Phase 2.7):
+        // If a leg has near-zero torque (|tau| < 1.0 Nm, nominal is 3.5~5 Nm) while the chassis
+        // is in motion, the wheel has lost ground support (suspended in air or stepping off a bump).
+        // Mask it out from contact_valid so it does not pull the terrain plane into a tilted deadlock!
+        // We only do this if at least 3 legs maintain ground contact to preserve plane fit solvability.
+        int supported_legs = 0;
+        for (int i = 0; i < NUM_LEGS; ++i) {
+            if (contact_valid[i] && std::abs(curr_ecc_efforts_(i)) >= 1.0) {
+                supported_legs++;
+            }
+        }
+        if (supported_legs >= 3) {
+            for (int i = 0; i < NUM_LEGS; ++i) {
+                if (contact_valid[i] && std::abs(curr_ecc_efforts_(i)) < 1.0) {
+                    contact_valid[i] = false;
+                }
+            }
+        }
+
+        // Run plane fitting via pseudo-inverse least squares in robot heading frame
+        if (!task_controller_->isActive()) {
+            bool is_stopped = (active_cmd_vel.norm() < 1e-3);
+            terrain_estimator_->update(foot_pos_in_base, R_base, contact_valid, is_stopped);
+        }
+        TerrainState terrain_state = terrain_estimator_->getState();
+
+        // ============================================================
+        // Phase 3: Contact Detection (Multi-Modal: Torque + Wheel Stall + Chassis Blocked)
+        // ============================================================
+        contact_detector_->update(
+            curr_ecc_efforts_, curr_wheel_efforts_, curr_wheel_velocities_,
+            body_state.linear_velocity.x(), active_cmd_vel.x(), dt);
 
         // ============================================================
         // Phase 4: FSM Task Controller (climbing state machine)
         // ============================================================
         if (!is_homing_ && !e_stop_active_) {
-            task_controller_->update(*contact_detector_, curr_ecc_angles_, dt);
+            // Forward Motion & Steering Inhibit Gate (Layer 2 Defense):
+            bool forward_straight_active = (cmd_vel_(0) > 0.05) &&
+                                           (std::abs(cmd_vel_(2)) < 0.60) &&
+                                           (std::abs(cmd_vel_(1)) < 0.15) &&
+                                           (std::abs(curr_steer_angles_(0)) < 0.52) &&
+                                           (std::abs(curr_steer_angles_(1)) < 0.52);
+
+            // Ramp Inhibit Gate:
+            // 1. Steady-state 4-wheel fitted slope angle:
+            bool steady_ramp = (terrain_state.slope_angle > robot_params_.ramp_inhibit_slope_threshold);
+
+            // 2. Millisecond-level instantaneous IMU pitch dynamics:
+            // When front wheels hit the bottom lip of a ramp, chassis immediately pitches up.
+            // A vertical curb does NOT pitch the chassis up (it rigidly blocks the wheels).
+            double pitch_curr = body_state.pitch();
+            double pitch_rate = body_state.angular_velocity.y();
+            bool transient_ramp = (cmd_vel_(0) > 0.05) &&
+                                  ((pitch_curr > robot_params_.ramp_inhibit_pitch_threshold) ||
+                                   (pitch_rate > robot_params_.ramp_inhibit_pitch_rate_threshold));
+
+            bool is_on_ramp = steady_ramp || transient_ramp;
+
+            bool obstacle_climb_permitted = forward_straight_active && !is_on_ramp;
+
+            if (!task_controller_->isActive() && !obstacle_climb_permitted) {
+                contact_detector_->reset();
+            } else if (task_controller_->isActive() && is_on_ramp &&
+                       (task_controller_->getState() == tasks::ClimbState::FRONT_CONTACT ||
+                        task_controller_->getState() == tasks::ClimbState::FRONT_LIFT ||
+                        task_controller_->getState() == tasks::ClimbState::FRONT_PLACED)) {
+                // If FSM was triggered near ramp foot, but robot is on a continuous ramp,
+                // abort immediately and hand control back to BalanceController.
+                task_controller_->abort();
+            }
+            task_controller_->update(*contact_detector_, curr_ecc_angles_, curr_ecc_efforts_, dt);
         }
 
         // Log FSM state transitions
@@ -297,39 +397,8 @@ private:
         }
 
         // ============================================================
-        // Phase 2.5: Terrain Estimation (Eq 4-6 in paper)
-        // ============================================================
-        std::array<Eigen::Vector3d, NUM_LEGS> contact_points_world;
-        std::array<bool, NUM_LEGS> contact_valid = task_controller_->getContactValid();
-
-        Eigen::Vector3d base_pos = body_state.position;
-        Eigen::Matrix3d R_base = body_state.orientation.toRotationMatrix();
-
-        for (int i = 0; i < NUM_LEGS; ++i) {
-            Eigen::Vector3d B_r_i = kinematics_->computeFootPositionInBase(
-                i, curr_steer_angles_(i), curr_ecc_angles_(i));
-            // p_C = p + R * ^B r_i (Eq 2)
-            contact_points_world[i] = base_pos + R_base * B_r_i;
-        }
-
-        // ============================================================
         // Phase 5: Driving Controller (with Bank Angle)
         // ============================================================
-        Eigen::Vector3d active_cmd_vel = is_homing_ ? Eigen::Vector3d::Zero() : cmd_vel_;
-
-        // If FSM is actively climbing, override forward velocity
-        if (task_controller_->isActive()) {
-            double fsm_vx = task_controller_->getForwardVelocityOverride();
-            active_cmd_vel = Eigen::Vector3d(fsm_vx, 0.0, 0.0);
-        }
-
-        // Run plane fitting via pseudo-inverse least squares (Eq 5: a = W^+ p^z)
-        // Only update continuous terrain plane when FSM is not actively negotiating discontinuous obstacles
-        if (!task_controller_->isActive()) {
-            bool is_stopped = (active_cmd_vel.norm() < 1e-3);
-            terrain_estimator_->update(contact_points_world, contact_valid, is_stopped);
-        }
-
         auto [target_steer, target_wheel] = driving_controller_->update(
             active_cmd_vel, curr_steer_angles_, curr_ecc_angles_, dt,
             e_stop_active_, is_homing_);
@@ -337,33 +406,34 @@ private:
         // ============================================================
         // Phase 6: Balance Controller (with Bank Angle overlay)
         // ============================================================
-        double active_height = is_homing_ ? 0.22 : target_height_;
+        double active_height = is_homing_ ? 0.18 : target_height_;
         double active_roll   = is_homing_ ? 0.0 : target_roll_;
         double active_pitch  = is_homing_ ? 0.0 : target_pitch_;
 
         // Overlay bank angle from driving controller onto target roll
         active_roll += driving_controller_->getBankAngle();
 
-        Eigen::Matrix3d R_T = terrain_estimator_->getState().rotation;
-
         // Call updateHybrid using contact points from Phase 2.5 and body_state from Phase 2
         ControlOutput balance_out = balance_controller_->updateHybrid(
             active_height, active_roll, active_pitch,
-            target_steer, curr_ecc_angles_, body_state,
-            contact_points_world, contact_valid, R_T, dt, e_stop_active_);
+            target_steer, curr_ecc_angles_, curr_ecc_efforts_, body_state,
+            contact_points_world, contact_valid, terrain_state, dt, e_stop_active_);
 
         Eigen::Vector4d target_ecc = balance_out.ecc_angles;
 
         // ============================================================
         // Phase 7: FSM Override — replace specific legs if climbing
         // ============================================================
+        // Always snapshot the FSM override angles; needed for blend-out lerp in Phase 8
+        // even when isActive() is false (during the IDLE blend-out period).
+        Eigen::Vector4d ecc_overrides_vec = task_controller_->getEccOverrides();
+
         if (task_controller_->isActive()) {
             auto override_mask = task_controller_->getOverrideMask();
-            Eigen::Vector4d ecc_overrides = task_controller_->getEccOverrides();
 
             for (int i = 0; i < NUM_LEGS; ++i) {
                 if (override_mask[i]) {
-                    target_ecc(i) = ecc_overrides(i);
+                    target_ecc(i) = ecc_overrides_vec(i);
                 }
             }
         }
@@ -391,12 +461,30 @@ private:
             cmd_msg.velocity.push_back(0.0);
             cmd_msg.effort.push_back(0.0);
 
-            // Eccentric: math → CAD (position + hybrid torque)
+            // Eccentric: math → CAD (with continuous Unwrap + blend-out lerp)
             cmd_msg.name.push_back(ecc_names[i]);
-            double cad_angle = target_ecc(i) * ecc_signs_[i] + ecc_offsets_[i];
-            while (cad_angle >  M_PI) cad_angle -= 2.0 * M_PI;
-            while (cad_angle <= -M_PI) cad_angle += 2.0 * M_PI;
-            cmd_msg.position.push_back(cad_angle);
+
+            // 1. Convert math-frame target to raw CAD frame
+            double raw_cad = target_ecc(i) * ecc_signs_[i] + ecc_offsets_[i];
+
+            // 2. Blend-out lerp: when FSM just finished (IDLE + blend_out_weight_ > 0),
+            //    interpolate between the last FSM override angle and the IK angle.
+            //    This prevents the chassis from slamming down immediately after climbing.
+            double blend_w = task_controller_->getBlendWeight();
+            if (blend_w > 0.0 && task_controller_->getOverrideMask()[i]) {
+                double fsm_cad = ecc_overrides_vec(i) * ecc_signs_[i] + ecc_offsets_[i];
+                raw_cad = blend_w * fsm_cad + (1.0 - blend_w) * raw_cad;
+            }
+
+            // 3. Continuous angle Unwrap (shortest-arc delta from previous command).
+            //    This replaces the old `while (cad > π) cad -= 2π` modulo that
+            //    caused 360° instantaneous jumps and servo motor runaway.
+            double delta = std::atan2(std::sin(raw_cad - prev_cad_ecc_[i]),
+                                      std::cos(raw_cad - prev_cad_ecc_[i]));
+            double safe_cad = prev_cad_ecc_[i] + delta;
+            prev_cad_ecc_[i] = safe_cad;
+
+            cmd_msg.position.push_back(safe_cad);
             cmd_msg.velocity.push_back(0.0);
 
             // Zero out feedforward GRF torque for FSM-overridden legs to prevent conflict with position trajectory
@@ -444,7 +532,7 @@ private:
     // State Variables
     // ================================================================
     Eigen::Vector3d cmd_vel_;
-    double target_height_ = 0.22;
+    double target_height_ = 0.18;
     double target_roll_   = 0.0;
     double target_pitch_  = 0.0;
 
@@ -458,6 +546,7 @@ private:
 
     ImuData latest_imu_;
     bool imu_received_ = false;
+    bool joints_initialized_ = false;  // true after first real joint_states received
 
     bool e_stop_active_ = false;
     double last_raw_joint_0_ = 0.0;
@@ -470,6 +559,11 @@ private:
     std::vector<double> ecc_signs_;
     std::vector<double> wheel_signs_;
     std::vector<double> ecc_offsets_;
+
+    // Continuous angle unwrap state for eccentric joint CAD commands.
+    // Tracks the last-commanded CAD-frame angle for each ecc joint to ensure
+    // the shortest-arc delta is applied each cycle, preventing 360° runaway.
+    std::array<double, 4> prev_cad_ecc_ = {0.0, 0.0, 0.0, 0.0};
 };
 
 }  // namespace robot_control

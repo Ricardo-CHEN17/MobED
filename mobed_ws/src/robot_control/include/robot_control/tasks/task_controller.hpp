@@ -32,17 +32,38 @@ enum class ClimbState {
  * @brief Parameters for the climbing task controller.
  */
 struct TaskControllerParams {
+    // ----------------------------------------------------------------
+    // Step-over geometry
+    //
+    // Per the paper (Section III-F): "rotate the eccentric joints until
+    // they reach the top of the curb" — NOT a fixed 180° flip.
+    //
+    // For l_ecc = 75 mm and a target step height of 5~8 cm:
+    //   Δθ_lift = asin((h_step + h_margin) / l_ecc)
+    //           ≈ asin((0.065 + 0.02) / 0.075) ≈ asin(1.13) → clamped to ~0.65 rad
+    //
+    // We use 0.65 rad (~37°) as a conservative universal value covering the
+    // 5 cm, 7.5 cm, and 10 cm curbs in the test playground.
+    // ----------------------------------------------------------------
+
+    // Angular increment to lift the wheel above the curb edge (rad)
+    double step_over_angle = 0.65;
+
+    // Extra overshoot angle at the trajectory peak to guarantee clearance (rad)
+    double lift_peak_angle_offset = 0.15;  // total peak = step_over_angle + offset = 0.80 rad
+
+    // Target eccentric angle for rear legs after they are placed on top of curb.
+    // Rear legs operate at negative angles (outward-down config); after climbing
+    // they must return to this negative angle so wheels push DOWN onto the curb.
+    // Derived from posture IK at curb height ≈ 0.06 m → q_rear ≈ -0.80 rad.
+    double rear_settle_angle = -0.80;   // rad (rear leg stable-support angle on curb)
+
     // Duration for the front leg step-over trajectory (seconds)
     double front_lift_duration = 2.0;
     // Duration for the rear leg step-over trajectory (seconds)
     double rear_lift_duration = 2.0;
 
-    // Angular displacement for step-over (rad)
-    // ~π radians = 180° rotation to flip the leg over the obstacle
-    double step_over_angle = M_PI;
-
     // Forward drive duration after front legs are placed (seconds)
-    // Allows the body to move forward so rear wheels reach the obstacle
     double forward_drive_duration = 3.0;
     // Forward drive speed during body advance (m/s)
     double forward_drive_speed = 0.1;
@@ -50,12 +71,23 @@ struct TaskControllerParams {
     // Settling time after rear legs are placed (seconds)
     double settling_duration = 1.0;
 
-    // Intermediate lift height angle for the step-over waypoint (rad)
-    // This is the angle at the peak of the lift arc (above the obstacle)
-    double lift_peak_angle_offset = 0.3;  // extra overshoot above π
+    // Blend-out duration when returning from FSM to IDLE (seconds).
+    // During this window the override_mask weight fades from 1→0 linearly,
+    // preventing the chassis from suddenly slamming down to flat-ground height.
+    double blend_out_duration = 0.5;   // seconds
 
     // Debounce time to confirm contact detection (seconds)
-    double contact_debounce_time = 0.2;
+    double contact_debounce_time = 0.12;
+
+    // Refractory cooldown period after returning to IDLE (seconds).
+    // During cooldown, all impact triggers are inhibited so touchdown vibrations
+    // cannot re-trigger the climbing state machine.
+    double cooldown_duration = 1.0;
+
+    // Closed-loop touchdown detection threshold (Nm).
+    // During descent of step-over trajectory, resistive torque > threshold confirms
+    // solid contact with curb top surface, enabling early transition to placed/drive.
+    double touchdown_torque_threshold = 2.0;
 };
 
 /**
@@ -77,18 +109,23 @@ public:
     explicit TaskController(const TaskControllerParams& params = TaskControllerParams());
 
     /**
-     * @brief Update the FSM state machine.
+     * @brief Update the FSM state machine with joint efforts for closed-loop touchdown detection.
      *
-     * Processes contact detector signals, advances the active state,
-     * and generates eccentric joint trajectory commands.
-     *
-     * @param contact_detector  Reference to the contact detector (for impact flags)
+     * @param contact_detector    Reference to the contact detector (for impact flags)
      * @param current_ecc_angles  Current eccentric joint angles [FL, FR, RL, RR] (rad)
-     * @param dt  Time step (seconds)
+     * @param current_ecc_efforts Current eccentric joint efforts/torques [FL, FR, RL, RR] (Nm)
+     * @param dt                  Time step (seconds)
      */
     void update(const estimation::ContactDetector& contact_detector,
                 const Eigen::Vector4d& current_ecc_angles,
+                const Eigen::Vector4d& current_ecc_efforts,
                 double dt);
+
+    void update(const estimation::ContactDetector& contact_detector,
+                const Eigen::Vector4d& current_ecc_angles,
+                double dt) {
+        update(contact_detector, current_ecc_angles, Eigen::Vector4d::Zero(), dt);
+    }
 
     /**
      * @brief Check if the task controller is actively overriding any leg.
@@ -132,6 +169,15 @@ public:
     double getForwardVelocityOverride() const { return forward_vel_override_; }
 
     /**
+     * @brief Get the blend-out weight for smooth FSM→IDLE transitions.
+     *
+     * Returns 1.0 when fully in FSM control, fading to 0.0 over blend_out_duration.
+     * mobed_control_node uses this to lerp FSM override angles toward IK angles,
+     * preventing the chassis from slamming down when climbing completes.
+     */
+    double getBlendWeight() const { return blend_out_weight_; }
+
+    /**
      * @brief Get contact validity flags for each leg based on FSM state.
      * Airborne legs during FRONT_LIFT or REAR_LIFT report false.
      * @return Array of 4 booleans [FL, FR, RL, RR]
@@ -155,6 +201,8 @@ private:
     // Per-leg override commands and mask
     Eigen::Vector4d ecc_overrides_;
     std::array<bool, NUM_LEGS> override_mask_;
+    // Selective lift mask for decoupled single-wheel / dual-wheel climbing (Phase 3)
+    std::array<bool, NUM_LEGS> active_lift_mask_ = {false, false, false, false};
     double forward_vel_override_ = 0.0;
 
     // Trajectory generators for front and rear leg pairs
@@ -166,6 +214,12 @@ private:
     // Timing
     double state_timer_ = 0.0;        // time spent in current state
     double contact_debounce_ = 0.0;   // debounce timer for contact detection
+    double blend_out_timer_ = 0.0;    // timer counting the FSM→IDLE blend-out phase
+    double cooldown_timer_ = 0.0;     // refractory timer inhibiting re-triggers in IDLE
+
+    // Blend-out weight: 1.0 = full FSM override; 0.0 = fully handed back to balance controller.
+    // Exposed via getBlendWeight() so mobed_control_node can lerp between override and IK angles.
+    double blend_out_weight_ = 0.0;
 
     // Stored start angles for trajectory planning and placed angles
     Eigen::Vector4d lift_start_angles_;

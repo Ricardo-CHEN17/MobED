@@ -81,6 +81,23 @@ void StateEstimator::predict(const ImuData& imu, double dt) {
     x_.segment<3>(6).setZero();
 
     // ================================================================
+    // 3b. Vertical velocity leaky-integrator damping
+    //
+    // Without a direct height measurement, the vertical velocity v_z
+    // accumulates unbounded drift from IMU bias and gravity-subtraction error.
+    // We apply a soft exponential decay (leaky integration) on v_z only.
+    // This is equivalent to a very weak prior that the robot is on a surface
+    // (v_z ≈ 0 in steady state), without conflicting with the wheel-odometry
+    // correction that runs on the X/Y axes.
+    //
+    // Decay time constant τ_z ≈ 0.5 s   →   decay_rate = 1 - dt/τ_z
+    // ================================================================
+    const double vz_decay_tau = 0.5;  // seconds
+    double vz_decay = 1.0 - dt / vz_decay_tau;
+    if (vz_decay < 0.0) vz_decay = 0.0;
+    x_(5) *= vz_decay;  // x_[5] = v_z
+
+    // ================================================================
     // 4. Propagate covariance: P = F * P * F^T + Q * dt
     // ================================================================
     auto F = computeF(dt);

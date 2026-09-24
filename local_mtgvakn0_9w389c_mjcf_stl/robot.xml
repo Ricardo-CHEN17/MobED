@@ -104,10 +104,10 @@
     <position name="act_steer_FR" joint="Steering_joint_RF" kp="300" kv="30" ctrllimited="true" ctrlrange="-3.14 3.14" />
     <position name="act_steer_RL" joint="Steering_joint_LB" kp="300" kv="30" ctrllimited="true" ctrlrange="-3.14 3.14" />
     <position name="act_steer_RR" joint="Steering_joint_RB" kp="300" kv="30" ctrllimited="true" ctrlrange="-3.14 3.14" />
-    <position name="act_ecc_FL" joint="Posture_control_joint_LF" kp="300" kv="30" ctrllimited="true" ctrlrange="-3.14 3.14" />
-    <position name="act_ecc_FR" joint="Posture_control_joint_RF" kp="300" kv="30" ctrllimited="true" ctrlrange="-3.14 3.14" />
-    <position name="act_ecc_RL" joint="Posture_control_joint_LB" kp="300" kv="30" ctrllimited="true" ctrlrange="-3.14 3.14" />
-    <position name="act_ecc_RR" joint="Posture_control_joint_RB" kp="300" kv="30" ctrllimited="true" ctrlrange="-3.14 3.14" />
+    <position name="act_ecc_FL" joint="Posture_control_joint_LF" kp="300" kv="30" ctrllimited="false" />
+    <position name="act_ecc_FR" joint="Posture_control_joint_RF" kp="300" kv="30" ctrllimited="false" />
+    <position name="act_ecc_RL" joint="Posture_control_joint_LB" kp="300" kv="30" ctrllimited="false" />
+    <position name="act_ecc_RR" joint="Posture_control_joint_RB" kp="300" kv="30" ctrllimited="false" />
     <velocity name="act_wheel_FL" joint="Wheel_joint_LF" kv="10" ctrllimited="true" ctrlrange="-50 50" />
     <velocity name="act_wheel_FR" joint="Wheel_joint_RF" kv="10" ctrllimited="true" ctrlrange="-50 50" />
     <velocity name="act_wheel_RL" joint="Wheel_joint_LB" kv="10" ctrllimited="true" ctrlrange="-50 50" />

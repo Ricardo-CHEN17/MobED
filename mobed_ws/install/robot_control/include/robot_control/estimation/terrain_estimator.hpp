@@ -31,7 +31,20 @@ public:
      * @param contact_valid   Array of 4 booleans indicating which legs are in contact
      * @param is_stopped      Whether robot is stationary (applies anti-latch flat decay)
      */
-    void update(const std::array<Eigen::Vector3d, NUM_LEGS>& contact_points,
+    /**
+     * @brief Update the terrain estimate using wheel contact points in base frame and body orientation.
+     *
+     * Computes contact points in gravity-aligned frame: p_{i,G} = R_base * ^B r_i (no base_pos drift),
+     * fits a plane, projects onto the robot heading (u_fwd, u_lat) to obtain pitch_slope and roll_slope,
+     * and constructs the heading-aligned terrain rotation matrix R_T.
+     *
+     * @param foot_pos_in_base Array of 4 foot positions in robot base frame (^B r_i)
+     * @param R_base           Body orientation rotation matrix (from IMU)
+     * @param contact_valid    Array of 4 booleans indicating which legs are in contact
+     * @param is_stopped       Whether robot is stationary (applies anti-latch flat decay)
+     */
+    void update(const std::array<Eigen::Vector3d, NUM_LEGS>& foot_pos_in_base,
+                const Eigen::Matrix3d& R_base,
                 const std::array<bool, NUM_LEGS>& contact_valid,
                 bool is_stopped = false);
 
@@ -50,8 +63,9 @@ private:
     RobotParams params_;
     TerrainState terrain_state_;
 
-    double filter_alpha_ = 0.08;        // LPF smoothing coefficient for normal vector
-    double max_slope_angle_ = 0.2618;   // rad (~15 deg), maximum allowed terrain slope angle
+    double filter_alpha_ = 0.30;        // LPF smoothing coefficient for normal vector (tau ≈ 67ms)
+    double max_slope_angle_ = 0.35;     // rad (~20 deg), maximum allowed terrain slope angle
+    Eigen::Vector3d gravity_normal_prev_ = Eigen::Vector3d(0.0, 0.0, 1.0);
 
     /**
      * @brief Fit a plane to a set of 3D points using SVD.

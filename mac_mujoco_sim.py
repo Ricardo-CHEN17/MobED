@@ -48,6 +48,25 @@ def get_joint_positions(model, data):
     return positions
 
 
+def get_joint_velocities(model, data):
+    """Read current qvel for all 12 joints in canonical order."""
+    velocities = []
+    for name in JOINT_NAMES:
+        jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
+        velocities.append(float(data.qvel[model.jnt_dofadr[jid]]))
+    return velocities
+
+
+def get_joint_efforts(model, data):
+    """Read current actuator output forces for all 12 actuators in canonical order.
+
+    data.actuator_force[i] is the scalar force/torque actually applied by
+    actuator i after clamping and gear ratios.  The actuator ordering in the
+    XML matches JOINT_NAMES, so index i here maps directly to JOINT_NAMES[i].
+    """
+    return [float(data.actuator_force[i]) for i in range(model.nu)]
+
+
 def main():
     parser = argparse.ArgumentParser(description='MuJoCo Simulation Runner for MobED')
     parser.add_argument('--flat', action='store_true', help='Use flat ground scene (robot.xml)')
@@ -114,15 +133,25 @@ def main():
             # ---- Send state back to Docker ----
             if docker_addr is not None:
                 try:
-                    state = get_joint_positions(model, data)
+                    state_pos = get_joint_positions(model, data)
+                    state_vel = get_joint_velocities(model, data)
+                    state_eff = get_joint_efforts(model, data)
                     chassis_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, 'chassis')
                     imu_data = {
-                        'quat': [float(data.qpos[3]), float(data.qpos[4]), float(data.qpos[5]), float(data.qpos[6])], # [qw, qx, qy, qz]
+                        'quat': [float(data.qpos[3]), float(data.qpos[4]),
+                                 float(data.qpos[5]), float(data.qpos[6])],  # [qw, qx, qy, qz]
                         'omega': [float(data.qvel[3]), float(data.qvel[4]), float(data.qvel[5])],
-                        'acc': [float(data.cacc[chassis_id][3]), float(data.cacc[chassis_id][4]), float(data.cacc[chassis_id][5])]
+                        'acc': [float(data.cacc[chassis_id][3]),
+                                float(data.cacc[chassis_id][4]),
+                                float(data.cacc[chassis_id][5])]
                     }
-                    sock.sendto(json.dumps({'state': state, 'imu': imu_data}).encode('utf-8'),
-                                docker_addr)
+                    payload = {
+                        'state':    state_pos,   # joint positions  [12]
+                        'velocity': state_vel,   # joint velocities [12]
+                        'effort':   state_eff,   # actuator forces  [12]
+                        'imu':      imu_data,
+                    }
+                    sock.sendto(json.dumps(payload).encode('utf-8'), docker_addr)
                 except Exception:
                     pass
 

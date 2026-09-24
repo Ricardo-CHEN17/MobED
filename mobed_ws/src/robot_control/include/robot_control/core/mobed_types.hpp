@@ -54,29 +54,31 @@ struct BodyState {
     double yaw()   const;
 };
 
-// Inline implementations of Euler angle extraction (ZYX convention)
+// Inline implementations of Euler angle extraction (standard Tait-Bryan ZYX convention)
 inline double BodyState::roll() const {
-    Eigen::Vector3d euler = orientation.toRotationMatrix().eulerAngles(2, 1, 0);
-    return euler(2);
+    Eigen::Matrix3d R = orientation.toRotationMatrix();
+    return std::atan2(R(2, 1), R(2, 2));
 }
 
 inline double BodyState::pitch() const {
-    Eigen::Vector3d euler = orientation.toRotationMatrix().eulerAngles(2, 1, 0);
-    return euler(1);
+    Eigen::Matrix3d R = orientation.toRotationMatrix();
+    return std::asin(std::clamp(-R(2, 0), -1.0, 1.0));
 }
 
 inline double BodyState::yaw() const {
-    Eigen::Vector3d euler = orientation.toRotationMatrix().eulerAngles(2, 1, 0);
-    return euler(0);
+    Eigen::Matrix3d R = orientation.toRotationMatrix();
+    return std::atan2(R(1, 0), R(0, 0));
 }
 
 // ============================================================================
 // Terrain State — estimated ground plane under the robot
 // ============================================================================
 struct TerrainState {
-    Eigen::Matrix3d rotation = Eigen::Matrix3d::Identity();  // R_T: terrain rotation matrix
-    Eigen::Vector3d normal   = Eigen::Vector3d(0.0, 0.0, 1.0);  // terrain surface normal
+    Eigen::Matrix3d rotation = Eigen::Matrix3d::Identity();  // R_T: terrain rotation matrix in robot heading frame
+    Eigen::Vector3d normal   = Eigen::Vector3d(0.0, 0.0, 1.0);  // terrain surface normal in robot heading frame
     double slope_angle = 0.0;  // rad, overall inclination angle
+    double pitch_slope = 0.0;  // rad, longitudinal slope relative to robot heading (+ uphill)
+    double roll_slope  = 0.0;  // rad, lateral slope relative to robot heading
     bool is_valid = false;     // true after first successful estimation
 };
 

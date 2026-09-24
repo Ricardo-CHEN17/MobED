@@ -118,9 +118,9 @@ Eigen::Vector4d MobedKinematics::computePostureIK(
         double sol2 = normalize_angle(M_PI - std::asin(sin_val) - alpha);
         
         // Strict sign selection & feasible workspace filtering (Eq 15)
-        // Normal operating range: eccentric arm must point generally downwards
-        // to support the chassis (|q_ecc| <= max_ecc_angle).
-        double max_angle = 1.745; // ~100 deg
+        // Normal operating range: eccentric arm points downwards/backwards to support the chassis.
+        // Expanded to 120 deg (2.094 rad) to provide full deep-crouch stroke for 10-12 deg slope leveling.
+        double max_angle = 2.094; // ~120 deg
         bool sol1_feasible = std::abs(sol1) <= max_angle;
         bool sol2_feasible = std::abs(sol2) <= max_angle;
 
@@ -129,14 +129,14 @@ Eigen::Vector4d MobedKinematics::computePostureIK(
 
         double q_ecc;
         if (target_positive) {
-            // Prefer positive solution within feasible range
+            // Prefer positive solution within feasible range [0, max_angle]
             if (sol1_feasible && sol1 >= 0.0) q_ecc = sol1;
             else if (sol2_feasible && sol2 >= 0.0) q_ecc = sol2;
             else if (sol1_feasible) q_ecc = sol1;
             else if (sol2_feasible) q_ecc = sol2;
             else q_ecc = (sol1 >= 0.0) ? sol1 : sol2;
         } else {
-            // Prefer negative solution within feasible range
+            // Prefer negative solution within feasible range [-max_angle, 0]
             if (sol1_feasible && sol1 <= 0.0) q_ecc = sol1;
             else if (sol2_feasible && sol2 <= 0.0) q_ecc = sol2;
             else if (sol1_feasible) q_ecc = sol1;

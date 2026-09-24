@@ -96,6 +96,8 @@ class UdpInterfaceNode(Node):
     def _poll_udp(self):
         """Drain all pending UDP packets; publish the latest state and IMU."""
         latest_state = None
+        latest_velocity = None
+        latest_effort = None
         latest_imu = None
 
         # Drain — always consume everything so the buffer never grows stale
@@ -105,6 +107,10 @@ class UdpInterfaceNode(Node):
                 parsed = json.loads(data.decode('utf-8'))
                 if 'state' in parsed and len(parsed['state']) == 12:
                     latest_state = parsed['state']
+                if 'velocity' in parsed and len(parsed['velocity']) == 12:
+                    latest_velocity = parsed['velocity']
+                if 'effort' in parsed and len(parsed['effort']) == 12:
+                    latest_effort = parsed['effort']
                 if 'imu' in parsed and isinstance(parsed['imu'], dict):
                     latest_imu = parsed['imu']
             except BlockingIOError:
@@ -119,7 +125,7 @@ class UdpInterfaceNode(Node):
 
         if latest_state is not None:
             self.last_recv_time = now
-            self._publish_joint_states(latest_state)
+            self._publish_joint_states(latest_state, latest_velocity, latest_effort)
             if latest_imu is not None:
                 self._publish_imu(latest_imu)
         elif (now - self.last_recv_time) > WATCHDOG_TIMEOUT:
@@ -128,15 +134,20 @@ class UdpInterfaceNode(Node):
             self.get_logger().warn(
                 'No UDP data from Mac for >0.5 s — publishing zero state',
                 throttle_duration_sec=2.0)
-            self._publish_joint_states([0.0] * 12)
+            self._publish_joint_states([0.0] * 12, None, None)
 
-    def _publish_joint_states(self, values: list):
+    def _publish_joint_states(self, positions: list, velocities: list = None, efforts: list = None):
+        """Publish a JointState message with positions, velocities, and efforts.
+
+        velocities and efforts fall back to all-zeros when not provided
+        (watchdog path or old protocol compatibility).
+        """
         js = JointState()
         js.header.stamp = self.get_clock().now().to_msg()
         js.name = list(JOINT_NAMES)
-        js.position = [float(v) for v in values]
-        js.velocity = [0.0] * 12
-        js.effort = [0.0] * 12
+        js.position = [float(v) for v in positions]
+        js.velocity = [float(v) for v in velocities] if velocities is not None else [0.0] * 12
+        js.effort   = [float(v) for v in efforts]    if efforts   is not None else [0.0] * 12
         self.pub_states.publish(js)
 
     def _publish_imu(self, imu_dict: dict):
