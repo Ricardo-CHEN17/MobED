@@ -387,12 +387,14 @@ private:
             task_controller_->update(*contact_detector_, curr_ecc_angles_, curr_ecc_efforts_, dt);
         }
 
-        // Log FSM state transitions
+        // Log FSM state transitions with override mask info
         static std::string prev_state_name = "IDLE";
         std::string curr_state_name = task_controller_->getStateName();
         if (curr_state_name != prev_state_name) {
-            RCLCPP_INFO(this->get_logger(), "FSM Transition: %s → %s",
-                        prev_state_name.c_str(), curr_state_name.c_str());
+            auto mask = task_controller_->getOverrideMask();
+            RCLCPP_INFO(this->get_logger(), "FSM Transition: %s → %s | Overrides: [FL:%d FR:%d RL:%d RR:%d]",
+                        prev_state_name.c_str(), curr_state_name.c_str(),
+                        mask[FL], mask[FR], mask[RL], mask[RR]);
             prev_state_name = curr_state_name;
         }
 

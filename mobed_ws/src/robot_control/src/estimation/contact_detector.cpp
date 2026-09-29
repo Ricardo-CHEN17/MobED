@@ -71,6 +71,7 @@ void ContactDetector::update(
     double dt)
 {
     if (dt <= 0.0 || dt > 0.5) return;
+    (void)chassis_forward_vel;  // Decoupled in favor of per-wheel stall detection
 
     // First call: just store the initial values
     if (!initialized_) {
@@ -83,13 +84,8 @@ void ContactDetector::update(
     // Clear impact flags from previous cycle
     impact_flags_.fill(false);
 
-    // Chassis blockage gate:
-    // A true obstacle (>=5cm vertical stair) physically halts the robot's forward progress,
-    // causing forward chassis velocity to drop to near zero (vx < chassis_blocked_vel_threshold).
-    // If the chassis is still moving forward (vx > 0.06 m/s), the robot is simply rolling over
-    // a 2~3cm bump, thin board lip, or speed bump — suspension compliance absorbs it without climbing!
-    bool chassis_blocked = (cmd_forward_vel > 0.08) &&
-                           (chassis_forward_vel < params_.chassis_blocked_vel_threshold);
+    // Forward command gate: only check impact when driving forward
+    bool forward_cmd_active = (cmd_forward_vel > 0.05);
 
     for (int i = 0; i < NUM_LEGS; ++i) {
         // ============================================================
@@ -106,22 +102,23 @@ void ContactDetector::update(
         //
         // Stage 1 (Shock Onset):
         // When a sudden transient spike in eccentric torque rate occurs,
-        // arm a 200 ms collision observation window.
+        // arm a collision observation window (0.35s).
         // ============================================================
         if (std::abs(ecc_torque_rates_(i)) > params_.contact_torque_rate_threshold) {
             shock_window_timer_[i] = params_.shock_window_duration;
         }
 
         // ============================================================
-        // Stage 2 (Sustained Load Confirmation):
+        // Stage 2 (Per-Wheel Sustained Load Confirmation):
         // While within the shock window, if:
-        //   1. The chassis forward progress is rigidly blocked (chassis_blocked)
+        //   1. Forward motion is actively commanded (forward_cmd_active)
         //   2. The eccentric link experiences sustained resistive torque load (|τ_ecc| > contact_torque_threshold)
-        //   3. The drive wheel is truly stalled against a vertical face (|τ_wheel| > 8.0 Nm AND |ω_wheel| < 0.4 rad/s)
-        // accumulate the sustain confirmation timer.
+        //   3. That specific drive wheel is stalled against an obstacle face (|τ_wheel| > 7.0 Nm AND |ω_wheel| < 0.5 rad/s)
+        // accumulate the sustain confirmation timer for this wheel independently!
         //
-        // Once sustained for >= sustain_confirm_duration (0.18s / 9 frames),
-        // confirm the obstacle impact.
+        // This decouples unilateral obstacle impacts: when only FL hits a curb,
+        // FL stalls independently while FR continues to roll, allowing FL to confirm
+        // without waiting for the whole chassis to stop.
         // ============================================================
         if (shock_window_timer_[i] > 0.0) {
             shock_window_timer_[i] = std::max(0.0, shock_window_timer_[i] - dt);
@@ -130,7 +127,7 @@ void ContactDetector::update(
             bool wheel_stalled = (std::abs(wheel_efforts(i)) > params_.wheel_stall_torque_threshold) &&
                                  (std::abs(wheel_velocities(i)) < params_.wheel_stall_vel_threshold);
 
-            if (chassis_blocked && ecc_loaded && wheel_stalled) {
+            if (forward_cmd_active && ecc_loaded && wheel_stalled) {
                 sustain_timer_[i] += dt;
                 if (sustain_timer_[i] >= params_.sustain_confirm_duration) {
                     impact_flags_[i] = true;

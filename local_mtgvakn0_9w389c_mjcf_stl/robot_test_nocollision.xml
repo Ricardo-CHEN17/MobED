@@ -1,5 +1,12 @@
 <mujoco model="generated_robot">
   <compiler angle="radian" eulerseq="xyz" autolimits="true" balanceinertia="true" boundinertia="1e-8" />
+  <visual>
+    <headlight ambient="0.12 0.12 0.12" diffuse="0.0 0.0 0.0" specular="0.0 0.0 0.0" />
+    <quality shadowsize="4096" />
+    <global offwidth="1920" offheight="1080" />
+    <map shadowclip="0.5" shadowscale="0.8" />
+    <rgba haze="0.15 0.25 0.35 1" />
+  </visual>
   <asset>
     <mesh name="part_001_solid_001" file="meshes/part_001_solid_001.stl" scale="0.001 0.001 0.001" />
     <mesh name="part_002_solid_002" file="meshes/part_002_solid_002.stl" scale="0.001 0.001 0.001" />
@@ -14,13 +21,22 @@
     <mesh name="part_006_solid_006" file="meshes/part_006_solid_006.stl" scale="0.001 0.001 0.001" />
     <mesh name="part_009_solid_009" file="meshes/part_009_solid_009.stl" scale="0.001 0.001 0.001" />
     <mesh name="part_012_solid_012" file="meshes/part_012_solid_012.stl" scale="0.001 0.001 0.001" />
+
+    <texture name="skybox" type="skybox" builtin="gradient" rgb1="0.35 0.55 0.75" rgb2="0.82 0.87 0.92" width="512" height="512" />
+    <texture name="grid" type="2d" builtin="checker" width="512" height="512" rgb1="0.66 0.68 0.71" rgb2="0.56 0.58 0.61" />
+    <material name="grid_mat" texture="grid" texrepeat="10 10" reflectance="0.08" specular="0.15" />
   </asset>
   <worldbody>
-    <light name="light" pos="0 0 3" dir="0 0 -1" />
-    <!-- 添加一个默认跟随摄像机 -->
-    <camera name="track_cam" mode="trackcom" pos="-1 0 0.5" xyaxes="0 -1 0 1 0 2" />
+    <!-- Lighting: Studio-grade Natural Outdoor Setup -->
+    <light name="sun" directional="true" pos="0 0 10" dir="0.4 0.6 -1.2" diffuse="0.68 0.68 0.65" specular="0.25 0.25 0.25" castshadow="true" />
+    <light name="sky_fill" directional="true" pos="0 0 10" dir="-0.4 -0.5 -0.8" diffuse="0.24 0.26 0.30" specular="0.02 0.02 0.02" castshadow="false" />
+    <light name="ground_bounce" directional="true" pos="0 0 -5" dir="0 0 1" diffuse="0.1 0.1 0.1" specular="0 0 0" castshadow="false" />
 
-    <geom name="floor" type="plane" size="5 5 0.1" rgba="0.8 0.9 0.8 1" contype="0" conaffinity="0" />
+    <!-- 添加默认跟随摄像机 -->
+    <camera name="track_cam" mode="trackcom" pos="-1 0 0.5" xyaxes="0 -1 0 1 0 2" />
+    <camera name="side_cam" mode="trackcom" pos="-1.3 -1.1 0.7" xyaxes="0.65 -0.76 0 0.38 0.33 0.87" />
+
+    <geom name="floor" type="plane" size="5 5 0.1" material="grid_mat" contype="0" conaffinity="0" />
 
     <body name="chassis" pos="0 0 0">
       <freejoint name="root" />

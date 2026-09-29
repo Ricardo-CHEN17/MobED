@@ -193,10 +193,13 @@ void TaskController::update(
                 active_lift_mask_[RL] = false;
                 active_lift_mask_[RR] = false;
 
-                // Fallback: if frontImpactDetected() was true but individual flags clear, lift both
+                // Asymmetric fallback: if neither flag was set, only lift the leg with higher effort
                 if (!active_lift_mask_[FL] && !active_lift_mask_[FR]) {
-                    active_lift_mask_[FL] = true;
-                    active_lift_mask_[FR] = true;
+                    if (std::abs(current_ecc_efforts(FL)) >= std::abs(current_ecc_efforts(FR))) {
+                        active_lift_mask_[FL] = true;
+                    } else {
+                        active_lift_mask_[FR] = true;
+                    }
                 }
                 transitionTo(ClimbState::FRONT_CONTACT);
             }

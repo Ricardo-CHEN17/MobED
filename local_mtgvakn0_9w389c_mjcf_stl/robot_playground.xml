@@ -5,6 +5,14 @@
     <joint armature="0.1" damping="1.0" />
   </default>
 
+  <visual>
+    <headlight ambient="0.12 0.12 0.12" diffuse="0.0 0.0 0.0" specular="0.0 0.0 0.0" />
+    <quality shadowsize="4096" />
+    <global offwidth="1920" offheight="1080" />
+    <map shadowclip="0.5" shadowscale="0.8" />
+    <rgba haze="0.15 0.25 0.35 1" />
+  </visual>
+
   <asset>
     <mesh name="part_001_solid_001" file="meshes/part_001_solid_001.stl" scale="0.001 0.001 0.001" />
     <mesh name="part_002_solid_002" file="meshes/part_002_solid_002.stl" scale="0.001 0.001 0.001" />
@@ -20,150 +28,183 @@
     <mesh name="part_009_solid_009" file="meshes/part_009_solid_009.stl" scale="0.001 0.001 0.001" />
     <mesh name="part_012_solid_012" file="meshes/part_012_solid_012.stl" scale="0.001 0.001 0.001" />
 
-    <texture name="grid" type="2d" builtin="checker" width="512" height="512" rgb1="0.92 0.93 0.95" rgb2="0.84 0.86 0.88" />
-    <material name="grid_mat" texture="grid" texrepeat="16 16" reflectance="0.05" />
+    <texture name="skybox" type="skybox" builtin="gradient" rgb1="0.35 0.55 0.75" rgb2="0.82 0.87 0.92" width="512" height="512" />
+    <texture name="grid" type="2d" builtin="checker" width="512" height="512" rgb1="0.66 0.68 0.71" rgb2="0.56 0.58 0.61" />
+    <material name="grid_mat" texture="grid" texrepeat="18 18" reflectance="0.08" specular="0.15" />
+
+    <texture name="hub_tex" type="2d" file="hub_marking.png" />
+    <material name="hub_mat" texture="hub_tex" texrepeat="1 1" reflectance="0.06" specular="0.1" />
+
+    <texture name="track_tex" type="2d" builtin="flat" width="128" height="128" rgb1="0.38 0.40 0.43" />
+    <material name="track_mat" texture="track_tex" reflectance="0.05" specular="0.1" />
+
+    <texture name="slip_tex" type="2d" builtin="flat" width="128" height="128" rgb1="0.70 0.85 0.95" />
+    <material name="slip_mat" texture="slip_tex" reflectance="0.3" specular="0.5" roughness="0.1" />
   </asset>
 
   <worldbody>
-    <!-- Lighting -->
-    <light name="sun" pos="0 0 8" dir="0 0 -1" diffuse="0.8 0.8 0.8" specular="0.2 0.2 0.2" castshadow="true" />
-    <light name="fill_light1" pos="5 5 4" dir="-1 -1 -0.8" diffuse="0.4 0.4 0.4" specular="0.1 0.1 0.1" />
-    <light name="fill_light2" pos="-5 -5 4" dir="1 1 -0.8" diffuse="0.4 0.4 0.4" specular="0.1 0.1 0.1" />
+    <!-- Lighting: Studio-grade Natural Outdoor Setup -->
+    <light name="sun" directional="true" pos="0 0 10" dir="0.4 0.6 -1.2" diffuse="0.68 0.68 0.65" specular="0.25 0.25 0.25" castshadow="true" />
+    <light name="sky_fill" directional="true" pos="0 0 10" dir="-0.4 -0.5 -0.8" diffuse="0.24 0.26 0.30" specular="0.02 0.02 0.02" castshadow="false" />
+    <light name="ground_bounce" directional="true" pos="0 0 -5" dir="0 0 1" diffuse="0.1 0.1 0.1" specular="0 0 0" castshadow="false" />
 
     <camera name="track_cam" mode="trackcom" pos="-1.5 0 0.8" xyaxes="0 -1 0 0.8 0 1.5" />
+    <camera name="side_cam" mode="trackcom" pos="-1.3 -1.1 0.7" xyaxes="0.65 -0.76 0 0.38 0.33 0.87" />
     <camera name="overview_cam" pos="0 -10 9" xyaxes="1 0 0 0 0.7 0.7" />
 
-    <!-- Main Floor (16m x 16m) -->
-    <geom name="floor" type="plane" size="8 8 0.1" material="grid_mat" contype="1" conaffinity="1" friction="1 0.005 0.0001" />
+    <!-- Main Ground Floor (18m x 18m) -->
+    <geom name="floor" type="plane" size="9 9 0.1" material="grid_mat" contype="1" conaffinity="1" friction="1 0.005 0.0001" />
 
-    <!-- Perimeter Boundary Walls -->
-    <geom name="wall_n" type="box" size="0.1 8.0 0.3" pos="8.0 0 0.3" rgba="0.55 0.6 0.65 0.7" contype="1" conaffinity="1" />
-    <geom name="wall_s" type="box" size="0.1 8.0 0.3" pos="-8.0 0 0.3" rgba="0.55 0.6 0.65 0.7" contype="1" conaffinity="1" />
-    <geom name="wall_e" type="box" size="8.0 0.1 0.3" pos="0 8.0 0.3" rgba="0.55 0.6 0.65 0.7" contype="1" conaffinity="1" />
-    <geom name="wall_w" type="box" size="8.0 0.1 0.3" pos="0 -8.0 0.3" rgba="0.55 0.6 0.65 0.7" contype="1" conaffinity="1" />
-
-    <!-- Central Staging Area Decal/Pad -->
-    <geom name="plaza_pad" type="box" size="2.0 2.0 0.001" pos="0 0 0.001" rgba="0.78 0.82 0.86 1" contype="0" conaffinity="0" />
+    <!-- Boundary Safety Walls -->
+    <geom name="wall_n" type="box" size="0.1 8.8 0.3" pos="8.8 0 0.3" rgba="0.55 0.6 0.65 0.7" contype="1" conaffinity="1" />
+    <geom name="wall_s" type="box" size="0.1 8.8 0.3" pos="-8.8 0 0.3" rgba="0.55 0.6 0.65 0.7" contype="1" conaffinity="1" />
+    <geom name="wall_e" type="box" size="8.8 0.1 0.3" pos="0 8.8 0.3" rgba="0.55 0.6 0.65 0.7" contype="1" conaffinity="1" />
+    <geom name="wall_w" type="box" size="8.8 0.1 0.3" pos="0 -8.8 0.3" rgba="0.55 0.6 0.65 0.7" contype="1" conaffinity="1" />
 
     <!-- =================================================================== -->
-    <!-- ZONE 1: 斜坡与调平测试区 (+X: X in [2.5, 7.5])                       -->
+    <!-- CENTRAL HUB: 多功能环岛与标定广场 (Origin: (0,0), 3.6m x 3.6m)        -->
+    <!-- 带有同心标定圆 (0.5m, 1.0m, 1.5m)、轴向参考线与全向横移/自转刻度       -->
     <!-- =================================================================== -->
-    <!-- Zone 1 Ground Pad -->
-    <geom name="z1_pad" type="box" size="2.6 1.8 0.001" pos="5.0 0 0.001" rgba="0.88 0.82 0.72 1" contype="0" conaffinity="0" />
+    <geom name="hub_pad" type="box" size="1.8 1.8 0.001" pos="0 0 0.001" material="hub_mat" contype="0" conaffinity="0" />
 
-    <!-- Track 1A: 纵向 10.2° 爬坡测试道 (Y = 0.8m) -->
-    <!-- 上坡 (run=1.8m, rise=0.32m, slope=10.08°, length=1.828m) -->
-    <geom name="z1_ramp_up" type="box" size="0.914 0.6 0.02" pos="3.4 0.8 0.16" euler="0 -0.176 0"
+    <!-- =================================================================== -->
+    <!-- OUTER CONTINUOUS PROVING LOOP: 外环连续机动闭环跑道 (消除折返痛点)   -->
+    <!-- =================================================================== -->
+    <!-- Straights (width: 1.6m, Z=0.001) -->
+    <geom name="loop_north" type="box" size="5.2 0.8 0.001" pos="0 7.2 0.001" material="track_mat" contype="0" conaffinity="0" />
+    <geom name="loop_south" type="box" size="5.2 0.8 0.001" pos="0 -7.2 0.001" material="track_mat" contype="0" conaffinity="0" />
+    <geom name="loop_east"  type="box" size="0.8 5.2 0.001" pos="7.2 0 0.001" material="track_mat" contype="0" conaffinity="0" />
+    <geom name="loop_west"  type="box" size="0.8 5.2 0.001" pos="-7.2 0 0.001" material="track_mat" contype="0" conaffinity="0" />
+
+    <!-- Outer Loop Guide Strip Lines (Yellow, Z=0.002) -->
+    <geom name="loop_line_n" type="box" size="4.5 0.025 0.0005" pos="0 7.2 0.002" rgba="0.95 0.85 0.2 1" contype="0" conaffinity="0" />
+    <geom name="loop_line_s" type="box" size="4.5 0.025 0.0005" pos="0 -7.2 0.002" rgba="0.95 0.85 0.2 1" contype="0" conaffinity="0" />
+    <geom name="loop_line_e" type="box" size="0.025 4.5 0.0005" pos="7.2 0 0.002" rgba="0.95 0.85 0.2 1" contype="0" conaffinity="0" />
+    <geom name="loop_line_w" type="box" size="0.025 4.5 0.0005" pos="-7.2 0 0.002" rgba="0.95 0.85 0.2 1" contype="0" conaffinity="0" />
+
+    <!-- Corner Connectors (东南、西南过渡弯角) -->
+    <geom name="loop_corner_se" type="box" size="1.0 1.0 0.001" pos="7.2 -7.2 0.001" material="track_mat" contype="0" conaffinity="0" />
+    <geom name="loop_corner_sw" type="box" size="1.0 1.0 0.001" pos="-7.2 -7.2 0.001" material="track_mat" contype="0" conaffinity="0" />
+
+    <!-- =================================================================== -->
+    <!-- ZONE 5: 低附着力打滑与自稳恢复测试区 (North-West Corner: 论文 Fig. 13)  -->
+    <!-- 模拟聚四氟乙烯/肥皂水板: friction = 0.08, 冰蓝视觉标识与安全警示边界     -->
+    <!-- =================================================================== -->
+    <geom name="z5_slip_plate" type="box" size="1.8 1.4 0.002" pos="-6.5 6.5 0.002"
+          material="slip_mat" contype="1" conaffinity="1" friction="0.08 0.005 0.0001" />
+    <geom name="z5_border" type="box" size="1.85 1.45 0.0005" pos="-6.5 6.5 0.001"
+          rgba="0.9 0.6 0.1 0.8" contype="0" conaffinity="0" />
+
+    <!-- =================================================================== -->
+    <!-- ZONE 4: 向心超高倾角弯道 (North-East Corner: 论文 Eq. 8)                -->
+    <!-- 7.5° 外高内低倾角过弯平台，测试向心主动倾斜 (Bank Angle) 抵消离心力      -->
+    <!-- =================================================================== -->
+    <geom name="z4_banked_corner" type="box" size="1.6 1.1 0.02" pos="6.8 6.8 0.08" euler="-0.09 0.09 0.7854"
+          rgba="0.55 0.72 0.62 1" contype="1" conaffinity="1" friction="1.2 0.005 0.0001" />
+
+    <!-- =================================================================== -->
+    <!-- ZONE 1: 坡道与车身水平调平测试道 (+X: X in [1.8, 6.4])                  -->
+    <!-- 双向缓坡爬坡高台 + 侧向倾斜道，直连东外环跑道，无需倒车掉头              -->
+    <!-- =================================================================== -->
+    <geom name="z1_pad" type="box" size="2.3 1.2 0.001" pos="4.1 0 0.001" rgba="0.88 0.82 0.72 1" contype="0" conaffinity="0" />
+    
+    <!-- Track 1A: 纵向 11.3° 爬坡道 (Y = 0.6m, 双向缓坡，直连东外环) -->
+    <!-- 上坡 (run=1.4m, rise=0.28m, length=1.428m, slope=11.3°) -->
+    <geom name="z1_ramp_up" type="box" size="0.714 0.45 0.02" pos="2.5 0.6 0.14" euler="0 -0.197 0"
           rgba="0.85 0.68 0.45 1" contype="1" conaffinity="1" friction="1.2 0.005 0.0001" />
-    <!-- 坡顶高台 (run=1.4m, height=0.32m) -->
-    <geom name="z1_plateau" type="box" size="0.7 0.6 0.16" pos="5.0 0.8 0.16"
+    <!-- 坡顶高台 (run=1.2m, height=0.28m) -->
+    <geom name="z1_plateau" type="box" size="0.6 0.45 0.14" pos="3.8 0.6 0.14"
           rgba="0.8 0.62 0.38 1" contype="1" conaffinity="1" friction="1.2 0.005 0.0001" />
-    <!-- 下坡 (run=1.8m, drop=0.32m, slope=10.08°) -->
-    <geom name="z1_ramp_down" type="box" size="0.914 0.6 0.02" pos="6.6 0.8 0.16" euler="0 0.176 0"
+    <!-- 下坡缓坡回流至外环 (run=1.4m, drop=0.28m) -->
+    <geom name="z1_ramp_down" type="box" size="0.714 0.45 0.02" pos="5.1 0.6 0.14" euler="0 0.197 0"
           rgba="0.85 0.68 0.45 1" contype="1" conaffinity="1" friction="1.2 0.005 0.0001" />
 
-    <!-- Track 1B: 侧向 9.5° 横滚倾斜道 (Y = -0.8m, length=5.0m, width=1.3m) -->
-    <geom name="z1_side_bank" type="box" size="2.5 0.65 0.02" pos="5.0 -0.8 0.12" euler="0.165 0 0"
+    <!-- Track 1B: 横滚 9.5° 侧坡道 (Y = -0.6m, length=4.0m, width=1.0m) -->
+    <geom name="z1_side_bank" type="box" size="2.0 0.5 0.02" pos="4.0 -0.6 0.09" euler="0.165 0 0"
           rgba="0.82 0.72 0.52 1" contype="1" conaffinity="1" friction="1.2 0.005 0.0001" />
 
     <!-- =================================================================== -->
-    <!-- ZONE 2: 台阶与路肩越障区 (+Y: Y in [2.5, 7.5])                       -->
+    <!-- ZONE 2: 渐进阶梯与路肩越障区 (+Y: Y in [1.8, 6.4])                  -->
+    <!-- 单向阶梯攀爬 + 后续缓坡下台阶，直通北外环                            -->
     <!-- =================================================================== -->
-    <!-- Zone 2 Ground Pad -->
-    <geom name="z2_pad" type="box" size="1.8 2.6 0.001" pos="0 5.0 0.001" rgba="0.72 0.78 0.88 1" contype="0" conaffinity="0" />
+    <geom name="z2_pad" type="box" size="1.4 2.3 0.001" pos="0 4.1 0.001" rgba="0.72 0.78 0.88 1" contype="0" conaffinity="0" />
 
-    <!-- Lane 2A: 5cm 低矮路肩 (X = -1.2m, Y in [3.0, 5.0]) -->
-    <geom name="z2_curb_5cm" type="box" size="0.45 1.0 0.025" pos="-1.2 4.0 0.025"
+    <!-- Lane 2A: 40mm 标准路肩 (X = -0.8m) -->
+    <geom name="z2_curb_40mm" type="box" size="0.35 0.8 0.02" pos="-0.8 3.5 0.02"
           rgba="0.45 0.55 0.75 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
-    <!-- 5cm 后方缓坡下台阶 -->
-    <geom name="z2_curb_5cm_ramp" type="box" size="0.45 0.4 0.015" pos="-1.2 5.4 0.025" euler="0.062 0 0"
+    <!-- 40mm 后方缓坡下台阶回流至北外环 -->
+    <geom name="z2_curb_40mm_ramp" type="box" size="0.35 0.5 0.012" pos="-0.8 4.8 0.02" euler="0.05 0 0"
           rgba="0.5 0.6 0.8 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
 
-    <!-- Lane 2B: 7.5cm 中度路肩 (X = 0.0m, Y in [3.0, 5.0]) - 对应偏心臂长度 -->
-    <geom name="z2_curb_75mm" type="box" size="0.45 1.0 0.0375" pos="0.0 4.0 0.0375"
+    <!-- Lane 2B: 70mm 中度路肩 (X = 0.0m) - 对应当前模型 75mm 偏心臂 -->
+    <geom name="z2_curb_70mm" type="box" size="0.35 0.8 0.035" pos="0.0 3.5 0.035"
           rgba="0.35 0.45 0.7 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
-    <!-- 7.5cm 后方缓坡下台阶 -->
-    <geom name="z2_curb_75mm_ramp" type="box" size="0.45 0.5 0.015" pos="0.0 5.5 0.0375" euler="0.075 0 0"
+    <!-- 70mm 后方缓坡回流至北外环 -->
+    <geom name="z2_curb_70mm_ramp" type="box" size="0.35 0.6 0.015" pos="0.0 4.9 0.035" euler="0.07 0 0"
           rgba="0.4 0.5 0.75 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
 
-    <!-- Lane 2C: 连续双阶梯 (X = 1.2m) - 1阶 5cm, 2阶 10cm -->
-    <geom name="z2_stair_step1" type="box" size="0.45 0.5 0.025" pos="1.2 3.5 0.025"
+    <!-- Lane 2C: 100mm 连续双阶梯 (X = 0.8m) - 1阶 50mm, 2阶 100mm -->
+    <geom name="z2_stair_step1" type="box" size="0.35 0.4 0.025" pos="0.8 3.0 0.025"
           rgba="0.3 0.4 0.65 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
-    <geom name="z2_stair_step2" type="box" size="0.45 0.6 0.05" pos="1.2 4.6 0.05"
+    <geom name="z2_stair_step2" type="box" size="0.35 0.5 0.05" pos="0.8 3.9 0.05"
           rgba="0.25 0.35 0.6 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
-    <!-- 10cm 缓坡下台阶 -->
-    <geom name="z2_stair_ramp" type="box" size="0.45 0.6 0.02" pos="1.2 5.8 0.05" euler="0.083 0 0"
+    <!-- 100mm 缓坡回流至北外环 -->
+    <geom name="z2_stair_ramp" type="box" size="0.35 0.6 0.02" pos="0.8 5.0 0.05" euler="0.083 0 0"
           rgba="0.35 0.45 0.7 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
 
     <!-- =================================================================== -->
-    <!-- ZONE 3: 减速带与非对称起伏路面 (-X: X in [-7.5, -2.5])              -->
+    <!-- ZONE 3: 减速带与动态悬挂滤波道 (-X: X in [-6.4, -1.8]: 论文 Fig. 10)  -->
+    <!-- 严格解耦 Pitch 与 Roll，直通西外环跑道                               -->
     <!-- =================================================================== -->
-    <!-- Zone 3 Ground Pad -->
-    <geom name="z3_pad" type="box" size="2.6 1.8 0.001" pos="-5.0 0 0.001" rgba="0.88 0.75 0.72 1" contype="0" conaffinity="0" />
+    <geom name="z3_pad" type="box" size="2.3 1.2 0.001" pos="-4.1 0 0.001" rgba="0.88 0.75 0.72 1" contype="0" conaffinity="0" />
 
-    <!-- Track 3A: 连续减速带 (Y = 0.8m) - 半圆柱凸起 (r=3.5cm, width=1.2m) -->
-    <geom name="z3_bump1" type="cylinder" size="0.035 0.55" pos="-3.2 0.8 0.015" euler="1.5708 0 0"
+    <!-- Lane 3A: 对称减速带道 (Y = 0.6m: 论文 Fig. 10(a) 右图 - 测 Pitch) -->
+    <!-- 2 条平行半圆柱减速带 (r=3.5cm, width=0.9m) -->
+    <geom name="z3_bump_sym1" type="cylinder" size="0.035 0.45" pos="-3.0 0.6 0.015" euler="1.5708 0 0"
           rgba="0.9 0.3 0.2 1" contype="1" conaffinity="1" friction="1.2 0.005 0.0001" />
-    <geom name="z3_bump2" type="cylinder" size="0.035 0.55" pos="-3.8 0.8 0.015" euler="1.5708 0 0"
+    <geom name="z3_bump_sym2" type="cylinder" size="0.035 0.45" pos="-4.2 0.6 0.015" euler="1.5708 0 0"
           rgba="0.9 0.3 0.2 1" contype="1" conaffinity="1" friction="1.2 0.005 0.0001" />
-    <geom name="z3_bump3" type="cylinder" size="0.035 0.55" pos="-4.6 0.8 0.015" euler="1.5708 0 0"
-          rgba="0.9 0.3 0.2 1" contype="1" conaffinity="1" friction="1.2 0.005 0.0001" />
-    <geom name="z3_bump4" type="cylinder" size="0.035 0.55" pos="-5.6 0.8 0.015" euler="1.5708 0 0"
-          rgba="0.9 0.3 0.2 1" contype="1" conaffinity="1" friction="1.2 0.005 0.0001" />
-    <geom name="z3_bump5" type="cylinder" size="0.035 0.55" pos="-6.8 0.8 0.015" euler="1.5708 0 0"
+    <geom name="z3_bump_sym3" type="cylinder" size="0.035 0.45" pos="-5.4 0.6 0.015" euler="1.5708 0 0"
           rgba="0.9 0.3 0.2 1" contype="1" conaffinity="1" friction="1.2 0.005 0.0001" />
 
-    <!-- Track 3B: 左右非对称交错颠簸路 (Y = -0.8m) - 考核导纳悬挂滤波 -->
-    <!-- 左轮颠簸块 (Y = -0.55m) -->
-    <geom name="z3_cobble_L1" type="box" size="0.15 0.15 0.015" pos="-3.2 -0.55 0.015"
-          rgba="0.8 0.4 0.3 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
-    <geom name="z3_cobble_L2" type="box" size="0.15 0.15 0.015" pos="-4.2 -0.55 0.015"
-          rgba="0.8 0.4 0.3 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
-    <geom name="z3_cobble_L3" type="box" size="0.15 0.15 0.018" pos="-5.2 -0.55 0.018"
-          rgba="0.8 0.4 0.3 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
-    <geom name="z3_cobble_L4" type="box" size="0.15 0.15 0.015" pos="-6.2 -0.55 0.015"
-          rgba="0.8 0.4 0.3 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
+    <!-- Lane 3B: 左右非对称交错颠簸道 (Y = -0.6m: 论文 Fig. 10(a) 左图 - 测 Roll) -->
+    <!-- 左轮颠簸块 (Y = -0.40m) -->
+    <geom name="z3_stagger_L1" type="box" size="0.15 0.15 0.018" pos="-2.8 -0.40 0.018"
+          rgba="0.85 0.4 0.25 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
+    <geom name="z3_stagger_L2" type="box" size="0.15 0.15 0.02" pos="-3.8 -0.40 0.02"
+          rgba="0.85 0.4 0.25 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
+    <geom name="z3_stagger_L3" type="box" size="0.15 0.15 0.018" pos="-4.8 -0.40 0.018"
+          rgba="0.85 0.4 0.25 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
+    <geom name="z3_stagger_L4" type="box" size="0.15 0.15 0.02" pos="-5.8 -0.40 0.02"
+          rgba="0.85 0.4 0.25 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
 
-    <!-- 右轮颠簸块 (Y = -1.05m) - 错位布置 -->
-    <geom name="z3_cobble_R1" type="box" size="0.15 0.15 0.015" pos="-3.7 -1.05 0.015"
-          rgba="0.75 0.35 0.25 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
-    <geom name="z3_cobble_R2" type="box" size="0.15 0.15 0.018" pos="-4.7 -1.05 0.018"
-          rgba="0.75 0.35 0.25 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
-    <geom name="z3_cobble_R3" type="box" size="0.15 0.15 0.015" pos="-5.7 -1.05 0.015"
-          rgba="0.75 0.35 0.25 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
-    <geom name="z3_cobble_R4" type="box" size="0.15 0.15 0.015" pos="-6.7 -1.05 0.015"
-          rgba="0.75 0.35 0.25 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
+    <!-- 右轮颠簸块 (Y = -0.80m) - 错位布置 -->
+    <geom name="z3_stagger_R1" type="box" size="0.15 0.15 0.018" pos="-3.3 -0.80 0.018"
+          rgba="0.75 0.35 0.2 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
+    <geom name="z3_stagger_R2" type="box" size="0.15 0.15 0.02" pos="-4.3 -0.80 0.02"
+          rgba="0.75 0.35 0.2 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
+    <geom name="z3_stagger_R3" type="box" size="0.15 0.15 0.018" pos="-5.3 -0.80 0.018"
+          rgba="0.75 0.35 0.2 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
+    <geom name="z3_stagger_R4" type="box" size="0.15 0.15 0.02" pos="-6.3 -0.80 0.02"
+          rgba="0.75 0.35 0.2 1" contype="1" conaffinity="1" friction="1.1 0.005 0.0001" />
 
     <!-- =================================================================== -->
-    <!-- ZONE 4: 连续绕桩与向心倾角弯道 (-Y: Y in [-7.5, -2.5])              -->
+    <!-- ZONE 6 / LANE D: 连续绕桩与狭缝机动区 (-Y: Y in [-6.4, -1.8])       -->
+    <!-- 标桩间距 1.0m，直通南外环跑道                                       -->
     <!-- =================================================================== -->
-    <!-- Zone 4 Ground Pad -->
-    <geom name="z4_pad" type="box" size="1.8 2.6 0.001" pos="0 -5.0 0.001" rgba="0.72 0.85 0.75 1" contype="0" conaffinity="0" />
+    <geom name="z6_pad" type="box" size="1.2 2.3 0.001" pos="0 -4.1 0.001" rgba="0.72 0.85 0.75 1" contype="0" conaffinity="0" />
 
-    <!-- 绕桩桩桶 (沿 X=0 轴线性排列，间距 1.1m) -->
-    <geom name="z4_pylon1" type="cylinder" size="0.06 0.25" pos="0 -3.2 0.25"
-          rgba="1.0 0.45 0.0 1" contype="1" conaffinity="1" />
-    <geom name="z4_pylon1_ring" type="cylinder" size="0.065 0.04" pos="0 -3.2 0.25"
-          rgba="1.0 1.0 1.0 1" contype="0" conaffinity="0" />
+    <geom name="z6_pylon1" type="cylinder" size="0.06 0.25" pos="0 -2.6 0.25" rgba="1.0 0.45 0.0 1" contype="1" conaffinity="1" />
+    <geom name="z6_pylon1_ring" type="cylinder" size="0.065 0.04" pos="0 -2.6 0.25" rgba="1.0 1.0 1.0 1" contype="0" conaffinity="0" />
 
-    <geom name="z4_pylon2" type="cylinder" size="0.06 0.25" pos="0 -4.3 0.25"
-          rgba="1.0 0.45 0.0 1" contype="1" conaffinity="1" />
-    <geom name="z4_pylon2_ring" type="cylinder" size="0.065 0.04" pos="0 -4.3 0.25"
-          rgba="1.0 1.0 1.0 1" contype="0" conaffinity="0" />
+    <geom name="z6_pylon2" type="cylinder" size="0.06 0.25" pos="0 -3.6 0.25" rgba="1.0 0.45 0.0 1" contype="1" conaffinity="1" />
+    <geom name="z6_pylon2_ring" type="cylinder" size="0.065 0.04" pos="0 -3.6 0.25" rgba="1.0 1.0 1.0 1" contype="0" conaffinity="0" />
 
-    <geom name="z4_pylon3" type="cylinder" size="0.06 0.25" pos="0 -5.4 0.25"
-          rgba="1.0 0.45 0.0 1" contype="1" conaffinity="1" />
-    <geom name="z4_pylon3_ring" type="cylinder" size="0.065 0.04" pos="0 -5.4 0.25"
-          rgba="1.0 1.0 1.0 1" contype="0" conaffinity="0" />
+    <geom name="z6_pylon3" type="cylinder" size="0.06 0.25" pos="0 -4.6 0.25" rgba="1.0 0.45 0.0 1" contype="1" conaffinity="1" />
+    <geom name="z6_pylon3_ring" type="cylinder" size="0.065 0.04" pos="0 -4.6 0.25" rgba="1.0 1.0 1.0 1" contype="0" conaffinity="0" />
 
-    <geom name="z4_pylon4" type="cylinder" size="0.06 0.25" pos="0 -6.5 0.25"
-          rgba="1.0 0.45 0.0 1" contype="1" conaffinity="1" />
-    <geom name="z4_pylon4_ring" type="cylinder" size="0.065 0.04" pos="0 -6.5 0.25"
-          rgba="1.0 1.0 1.0 1" contype="0" conaffinity="0" />
-
-    <!-- 侧方倾角弯道平台 (Banked Corner Pad: X=1.1m, Y=-5.0m, 内倾 6°) -->
-    <geom name="z4_banked_curve" type="box" size="0.65 2.2 0.015" pos="1.1 -5.0 0.045" euler="0 -0.105 0"
-          rgba="0.55 0.75 0.6 1" contype="1" conaffinity="1" friction="1.2 0.005 0.0001" />
+    <geom name="z6_pylon4" type="cylinder" size="0.06 0.25" pos="0 -5.6 0.25" rgba="1.0 0.45 0.0 1" contype="1" conaffinity="1" />
+    <geom name="z6_pylon4_ring" type="cylinder" size="0.065 0.04" pos="0 -5.6 0.25" rgba="1.0 1.0 1.0 1" contype="0" conaffinity="0" />
 
     <!-- =================================================================== -->
     <!-- ROBOT CHASSIS & MECHANISM                                           -->

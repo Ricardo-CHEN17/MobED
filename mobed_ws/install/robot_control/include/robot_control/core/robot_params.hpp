@@ -75,16 +75,16 @@ struct RobotParams {
     // -----------------------------------------------
     // Contact Detection Parameters (Multi-Modal Model)
     // -----------------------------------------------
-    double contact_torque_threshold      = 14.0;   // Nm, sustained effort load for obstacle collision confirmation
+    double contact_torque_threshold      = 9.0;    // Nm, sustained effort load for obstacle collision confirmation (calibrated for 5cm curbs)
     double contact_torque_rate_threshold = 120.0;  // Nm/s, shock onset rate threshold to arm observation window
-    double shock_window_duration         = 0.20;   // s, transient shock observation window
-    double sustain_confirm_duration          = 0.18;   // s, required sustained load duration to confirm impact (9 frames at 50Hz, filters 100ms small bump roll-over)
-    double wheel_stall_torque_threshold      = 8.0;    // Nm, drive wheel resistance confirmation (flat ground is < 2.0 Nm)
-    double wheel_stall_vel_threshold         = 0.4;    // rad/s (~0.04 m/s), maximum wheel rotation speed under true curb stall
-    double ramp_inhibit_slope_threshold      = 0.078;  // rad (~4.5 deg), slopes steeper than this inhibit stair climbing
-    double ramp_inhibit_pitch_threshold      = 0.045;  // rad (~2.5 deg), instantaneous IMU pitch angle threshold
+    double shock_window_duration         = 0.35;   // s, transient shock observation window (ample margin for motor ramp-up)
+    double sustain_confirm_duration      = 0.10;   // s, required sustained load duration to confirm impact (10 frames at 100Hz, immune to small bumps)
+    double wheel_stall_torque_threshold  = 7.0;    // Nm, drive wheel resistance confirmation (flat ground is < 2.0 Nm)
+    double wheel_stall_vel_threshold     = 0.5;    // rad/s (~0.03 m/s), maximum wheel rotation speed under true curb stall
+    double ramp_inhibit_slope_threshold  = 0.078;  // rad (~4.5 deg), slopes steeper than this inhibit stair climbing
+    double ramp_inhibit_pitch_threshold  = 0.045;  // rad (~2.5 deg), instantaneous IMU pitch angle threshold
     double ramp_inhibit_pitch_rate_threshold = 0.12;   // rad/s (~7 deg/s), instantaneous IMU pitch rate threshold
-    double chassis_blocked_vel_threshold     = 0.06;   // m/s, forward chassis speed threshold indicating true rigid blockage
+    double chassis_blocked_vel_threshold = 0.06;   // m/s, forward chassis speed threshold indicating true rigid blockage
 
     // -----------------------------------------------
     // Terrain Filter & Micro-Bump Decoupling Parameters
