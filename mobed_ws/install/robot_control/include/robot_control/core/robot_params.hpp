@@ -81,9 +81,9 @@ struct RobotParams {
     double sustain_confirm_duration      = 0.10;   // s, required sustained load duration to confirm impact (10 frames at 100Hz, immune to small bumps)
     double wheel_stall_torque_threshold  = 7.0;    // Nm, drive wheel resistance confirmation (flat ground is < 2.0 Nm)
     double wheel_stall_vel_threshold     = 0.5;    // rad/s (~0.03 m/s), maximum wheel rotation speed under true curb stall
-    double ramp_inhibit_slope_threshold  = 0.078;  // rad (~4.5 deg), slopes steeper than this inhibit stair climbing
-    double ramp_inhibit_pitch_threshold  = 0.045;  // rad (~2.5 deg), instantaneous IMU pitch angle threshold
-    double ramp_inhibit_pitch_rate_threshold = 0.12;   // rad/s (~7 deg/s), instantaneous IMU pitch rate threshold
+    double ramp_inhibit_slope_threshold  = 0.078;  // rad (~4.5 deg), pure pitch slope steeper than this inhibits stair climbing
+    double ramp_inhibit_pitch_threshold  = 0.087;  // rad (~5.0 deg), instantaneous IMU pitch threshold (Track 1A ramp is 11.3 deg)
+    double ramp_inhibit_pitch_rate_threshold = 0.25;   // rad/s (~14.3 deg/s), instantaneous IMU pitch rate threshold
     double chassis_blocked_vel_threshold = 0.06;   // m/s, forward chassis speed threshold indicating true rigid blockage
 
     // -----------------------------------------------

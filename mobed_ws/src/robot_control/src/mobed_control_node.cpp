@@ -357,20 +357,37 @@ private:
                                            (std::abs(curr_steer_angles_(0)) < 0.52) &&
                                            (std::abs(curr_steer_angles_(1)) < 0.52);
 
-            // Ramp Inhibit Gate:
-            // 1. Steady-state 4-wheel fitted slope angle:
-            bool steady_ramp = (terrain_state.slope_angle > robot_params_.ramp_inhibit_slope_threshold);
+            // ============================================================
+            // Ramp vs. Curb Physical Disambiguation (Aligned with IEEE RA-L 2026):
+            // On a smooth ramp (Track 1A), wheels roll continuously (omega > 1.0 rad/s).
+            // On a curb (Lane 2A/2B), wheels physically stall against the vertical face (omega < 0.5 rad/s, tau > 7 Nm).
+            // A vehicle with any drive wheel stalled CANNOT be rolling up a smooth ramp!
+            // ============================================================
+            bool fl_stalled = (std::abs(curr_wheel_efforts_(0)) > robot_params_.wheel_stall_torque_threshold) &&
+                              (std::abs(curr_wheel_velocities_(0)) < robot_params_.wheel_stall_vel_threshold);
+            bool fr_stalled = (std::abs(curr_wheel_efforts_(1)) > robot_params_.wheel_stall_torque_threshold) &&
+                              (std::abs(curr_wheel_velocities_(1)) < robot_params_.wheel_stall_vel_threshold);
+            bool front_wheel_stalled = fl_stalled || fr_stalled;
 
-            // 2. Millisecond-level instantaneous IMU pitch dynamics:
-            // When front wheels hit the bottom lip of a ramp, chassis immediately pitches up.
-            // A vertical curb does NOT pitch the chassis up (it rigidly blocks the wheels).
+            // 1. Steady-state Ramp Gate:
+            // A true continuous ramp is strictly longitudinal (pitch > 4.5 deg) with near-zero lateral roll (< 3.2 deg).
+            // Unilateral curbs produce heavy roll (> 5 deg) and must NOT be classified as ramps!
+            bool steady_ramp = (terrain_state.pitch_slope > robot_params_.ramp_inhibit_slope_threshold) &&
+                               (std::abs(terrain_state.roll_slope) < 0.055);
+
+            // 2. Transient Ramp Dynamics:
+            // Wheels must be actively rolling forward up a slope (> 1.0 rad/s),
+            // NOT halted or jammed against an obstacle face.
+            bool wheels_rolling_forward = (curr_wheel_velocities_(0) > 1.0) &&
+                                          (curr_wheel_velocities_(1) > 1.0);
             double pitch_curr = body_state.pitch();
             double pitch_rate = body_state.angular_velocity.y();
-            bool transient_ramp = (cmd_vel_(0) > 0.05) &&
+            bool transient_ramp = (cmd_vel_(0) > 0.05) && wheels_rolling_forward &&
                                   ((pitch_curr > robot_params_.ramp_inhibit_pitch_threshold) ||
                                    (pitch_rate > robot_params_.ramp_inhibit_pitch_rate_threshold));
 
-            bool is_on_ramp = steady_ramp || transient_ramp;
+            // Physical Disambiguation: A stalled wheel strictly overrides ramp detection!
+            bool is_on_ramp = !front_wheel_stalled && (steady_ramp || transient_ramp);
 
             bool obstacle_climb_permitted = forward_straight_active && !is_on_ramp;
 
@@ -380,7 +397,7 @@ private:
                        (task_controller_->getState() == tasks::ClimbState::FRONT_CONTACT ||
                         task_controller_->getState() == tasks::ClimbState::FRONT_LIFT ||
                         task_controller_->getState() == tasks::ClimbState::FRONT_PLACED)) {
-                // If FSM was triggered near ramp foot, but robot is on a continuous ramp,
+                // If FSM was triggered near ramp foot, but robot is truly rolling on a continuous ramp,
                 // abort immediately and hand control back to BalanceController.
                 task_controller_->abort();
             }
@@ -415,11 +432,21 @@ private:
         // Overlay bank angle from driving controller onto target roll
         active_roll += driving_controller_->getBankAngle();
 
+        // Prepare terrain state for BalanceController:
+        // When climbing an obstacle, zero out longitudinal pitch slope compensation so that
+        // BalanceController does not command grounded front legs into a deep crouch/lift.
+        TerrainState active_terrain_state = terrain_state;
+        if (task_controller_->isActive()) {
+            active_terrain_state.pitch_slope = 0.0;
+            active_terrain_state.rotation = Eigen::AngleAxisd(
+                active_terrain_state.roll_slope, Eigen::Vector3d::UnitX()).toRotationMatrix();
+        }
+
         // Call updateHybrid using contact points from Phase 2.5 and body_state from Phase 2
         ControlOutput balance_out = balance_controller_->updateHybrid(
             active_height, active_roll, active_pitch,
             target_steer, curr_ecc_angles_, curr_ecc_efforts_, body_state,
-            contact_points_world, contact_valid, terrain_state, dt, e_stop_active_);
+            contact_points_world, contact_valid, active_terrain_state, dt, e_stop_active_);
 
         Eigen::Vector4d target_ecc = balance_out.ecc_angles;
 
