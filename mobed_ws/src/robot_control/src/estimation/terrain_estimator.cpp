@@ -54,36 +54,30 @@ void TerrainEstimator::update(
     }
 
     // ================================================================
-    // 1. Diagonal Torsion Warping Test (Phase 2.7):
+    // 1. Diagonal Torsion Warping Test (Phase 2.7 & Paper Alignment):
     // For a rectangular 4-wheel robot on any planar macro-slope (pitch or roll),
     // the height relationship satisfies: (z_FL - z_FR) - (z_RL - z_RR) == 0.
     // When a single wheel runs over a cobblestone or is suspended in the air,
     // the four points form a hyperbolic warp with torsion == delta_z (15~30mm).
     // If torsion exceeds max_torsion_threshold (10mm), it is guaranteed to be an
     // asymmetric micro-bump or single-leg lift.
+    // NOTE: Evaluated directly on all 4 kinematic contact points regardless of contact_valid!
     // ================================================================
-    bool is_torsion_warped = false;
-    if (contact_valid[FL] && contact_valid[FR] && contact_valid[RL] && contact_valid[RR]) {
-        Eigen::Vector3d p_FL = R_base * foot_pos_in_base[FL];
-        Eigen::Vector3d p_FR = R_base * foot_pos_in_base[FR];
-        Eigen::Vector3d p_RL = R_base * foot_pos_in_base[RL];
-        Eigen::Vector3d p_RR = R_base * foot_pos_in_base[RR];
+    Eigen::Vector3d p_FL = R_base * foot_pos_in_base[FL];
+    Eigen::Vector3d p_FR = R_base * foot_pos_in_base[FR];
+    Eigen::Vector3d p_RL = R_base * foot_pos_in_base[RL];
+    Eigen::Vector3d p_RR = R_base * foot_pos_in_base[RR];
 
-        double torsion = std::abs((p_FL.z() - p_FR.z()) - (p_RL.z() - p_RR.z()));
-        if (torsion > params_.max_torsion_threshold) {
-            is_torsion_warped = true;
-        }
-    }
+    double torsion = std::abs((p_FL.z() - p_FR.z()) - (p_RL.z() - p_RR.z()));
+    bool is_torsion_warped = (torsion > params_.max_torsion_threshold);
 
     // ================================================================
-    // 2. Coplanarity Residual Test (Micro-Bump Decoupling):
+    // 2. Coplanarity Residual & 3-Point Degradation Guard:
     // In true macro-slopes (ramps, hills), all contact points lie
     // on a single geometric plane (coplanar residual RMS < 8mm).
-    // On cobblestones, speed bumps, or warped terrain,
-    // the points form a warped, non-coplanar set (RMS residual > 8mm).
-    // For non-coplanar micro-bumps or warped shapes, force raw_normal to world up (flat ground),
-    // allowing the active suspension admittance to absorb the bump locally
-    // without corrupting the kinematic terrain rotation matrix R_T!
+    // If only 3 wheels are in contact, calculate the distance of the 4th wheel
+    // to the fitted 3-point plane. If it exceeds 8mm, it is an obstacle, dip,
+    // or lifted leg, meaning the 3 points do NOT represent a true macro-slope!
     // ================================================================
     Eigen::Vector3d mean_point = Eigen::Vector3d::Zero();
     for (const auto& pt : valid_points) {
@@ -98,8 +92,20 @@ void TerrainEstimator::update(
     }
     double rms_residual = std::sqrt(sum_sq_residual / static_cast<double>(valid_points.size()));
 
-    if (is_torsion_warped || rms_residual > params_.terrain_coplanar_residual_threshold) {
-        // High warping / non-coplanar: this is micro-terrain (cobblestones/bumps/single-leg lift).
+    double fourth_wheel_dist = 0.0;
+    if (valid_points.size() == 3) {
+        for (int i = 0; i < NUM_LEGS; ++i) {
+            if (!contact_valid[i]) {
+                Eigen::Vector3d p_missing = R_base * foot_pos_in_base[i];
+                fourth_wheel_dist = std::abs(raw_normal.dot(p_missing - mean_point));
+                break;
+            }
+        }
+    }
+
+    if (is_torsion_warped || rms_residual > params_.terrain_coplanar_residual_threshold ||
+        (valid_points.size() == 3 && fourth_wheel_dist > params_.terrain_coplanar_residual_threshold)) {
+        // High warping / non-coplanar / unverified 3-point plane: this is micro-terrain (cobblestones/bumps/single-leg lift).
         // Snap to flat ground so kinematic IK does NOT rock the chassis or latch lifted leg!
         raw_normal = Eigen::Vector3d(0.0, 0.0, 1.0);
     }

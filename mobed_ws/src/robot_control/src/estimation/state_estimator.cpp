@@ -81,18 +81,13 @@ void StateEstimator::predict(const ImuData& imu, double dt) {
     x_.segment<3>(6).setZero();
 
     // ================================================================
-    // 3b. Vertical velocity leaky-integrator damping
+    // 3b. Vertical velocity soft damping safeguard
     //
-    // Without a direct height measurement, the vertical velocity v_z
-    // accumulates unbounded drift from IMU bias and gravity-subtraction error.
-    // We apply a soft exponential decay (leaky integration) on v_z only.
-    // This is equivalent to a very weak prior that the robot is on a surface
-    // (v_z ≈ 0 in steady state), without conflicting with the wheel-odometry
-    // correction that runs on the X/Y axes.
-    //
-    // Decay time constant τ_z ≈ 0.5 s   →   decay_rate = 1 - dt/τ_z
+    // With physical specific force properly measuring gravity (+9.81 m/s^2),
+    // accel_world is balanced at rest. We maintain a gentle soft decay (tau_z = 5.0s)
+    // as a bounded safeguard against long-term sensor thermal bias.
     // ================================================================
-    const double vz_decay_tau = 0.5;  // seconds
+    const double vz_decay_tau = 5.0;  // seconds (soft safety prior)
     double vz_decay = 1.0 - dt / vz_decay_tau;
     if (vz_decay < 0.0) vz_decay = 0.0;
     x_(5) *= vz_decay;  // x_[5] = v_z
@@ -172,9 +167,9 @@ void StateEstimator::correctWithOdometry(const Eigen::Vector4d& wheel_velocities
     Eigen::Vector3d v_world_pred = x_.segment<3>(3);
     Eigen::Vector3d v_body_pred = R.transpose() * v_world_pred;
 
-    // Innovation (measurement residual): body-frame linear velocity only
-    Eigen::Vector3d z_pred(v_body_pred.x(), v_body_pred.y(), 0.0);
-    Eigen::Vector3d z_meas(v_body_meas.x(), v_body_meas.y(), 0.0);
+    // Innovation (measurement residual): full 3D body-frame linear velocity (Paper Eq 2-3)
+    Eigen::Vector3d z_pred = v_body_pred;
+    Eigen::Vector3d z_meas = v_body_meas;
     Eigen::Vector3d innovation = z_meas - z_pred;
 
     // Observation Jacobian H (3x9):

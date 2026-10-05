@@ -177,13 +177,15 @@ void BalanceController::computeDesiredAcceleration(
 }
 
 double BalanceController::computeAdaptiveNominalHeight(
-    double target_height, double pitch_slope, double roll_slope) const
+    double target_height, double pitch_slope, double roll_slope, double commanded_roll) const
 {
-    // Required vertical difference to maintain level chassis
+    // Required vertical difference to maintain level chassis and accommodate active banking:
+    // Take the maximum of terrain roll slope and commanded active bank roll
+    double effective_roll = std::max(std::abs(std::sin(roll_slope)), std::abs(std::sin(commanded_roll)));
     double delta_z_req = robot_params_.length_x * std::abs(std::sin(pitch_slope))
-                       + robot_params_.width_y  * std::abs(std::sin(roll_slope));
+                       + robot_params_.width_y  * effective_roll;
 
-    // Slope Headroom Management (Phase 2.7):
+    // Slope & Bank Headroom Management (Phase 2.7):
     // Rather than subtracting delta_z_req directly (which caused a double-subtraction
     // when computePostureIK also subtracts delta_z_req via R_T), we define the admissible
     // envelope for the chassis reference height:
@@ -237,9 +239,9 @@ ControlOutput BalanceController::updateHybrid(
     double safe_roll  = std::clamp(target_roll,  -params_.max_roll,  params_.max_roll);
     double safe_pitch = std::clamp(target_pitch, -params_.max_pitch, params_.max_pitch);
 
-    // Compute dynamic adaptive height to preserve downhill leg stroke headroom
+    // Compute dynamic adaptive height to preserve downhill leg stroke headroom and bank angle stroke
     double h_adapt = computeAdaptiveNominalHeight(
-        target_height, terrain_state.pitch_slope, terrain_state.roll_slope);
+        target_height, terrain_state.pitch_slope, terrain_state.roll_slope, safe_roll);
 
     // Fast IMU Attitude Residual Feedback:
     // Terrain slope feedforward is already handled geometrically via terrain_state.rotation in computePostureIK.

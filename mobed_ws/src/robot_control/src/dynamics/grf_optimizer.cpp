@@ -95,43 +95,22 @@ double GrfOptimizer::computeVerticalJacobian(
     double roll,
     double pitch) const
 {
-    // ================================================================
-    // Vertical Jacobian: dz_foot / dq_ecc
-    //
-    // From the posture IK (mobed_kinematics.cpp), the height equation is:
-    //   height = -r31*px - r32*py + r33*r_wheel + z_offset + A*cos(q) + B*sin(q)
-    //
-    // where:
-    //   r31 = -sin(pitch)
-    //   r32 = sin(roll)*cos(pitch)
-    //   r33 = cos(roll)*cos(pitch)
-    //   A = l_ecc * (r31*cos(q_steer) + r32*sin(q_steer))
-    //   B = -l_ecc * r33
-    //
-    // z_world = const + A*sin(q_ecc) + B*cos(q_ecc)
-    // Therefore:
-    //   dz/dq_ecc = d(A*sin(q) + B*cos(q))/dq = A*cos(q_ecc) - B*sin(q_ecc)
-    // ================================================================
-
-    double cp = std::cos(pitch);
-    double sp = std::sin(pitch);
-    double cr = std::cos(roll);
-    double sr = std::sin(roll);
-
-    // leg_index reserved for future per-leg geometric offsets
     (void)leg_index;
+    (void)q_steer;
+    (void)roll;
+    (void)pitch;
 
-    double r31 = -sp;
-    double r32 = sr * cp;
-    double r33 = cr * cp;
-
-    double A = params_.l_ecc * (r31 * std::cos(q_steer) + r32 * std::sin(q_steer));
-    double B = -params_.l_ecc * r33;
-
-    // dz/dq_ecc = A*cos(q_ecc) - B*sin(q_ecc)
-    double J_z = A * std::cos(q_ecc) - B * std::sin(q_ecc);
-
-    return J_z;
+    // ================================================================
+    // Vertical Jacobian in Base Frame (Paper Section III.E.2, Eq 14):
+    //   tau_grf,i = J_i^T * ^B f_i
+    //
+    // In base frame (Paper Eq 2):
+    //   ^B r_{i,z} = -z_offset - l_ecc * cos(q_ecc) - r_wheel
+    //
+    // Differentiating with respect to q_ecc:
+    //   J_z,i = d(^B r_{i,z}) / dq_ecc = l_ecc * sin(q_ecc)
+    // ================================================================
+    return params_.l_ecc * std::sin(q_ecc);
 }
 
 Eigen::Vector4d GrfOptimizer::grfToEccTorque(

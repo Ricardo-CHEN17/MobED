@@ -20,12 +20,15 @@ double DrivingController::computeBankAngle(const Eigen::Vector3d& cmd_vel) const
     double vx = cmd_vel(0); // Forward velocity
     double wz = cmd_vel(2); // Yaw rate
 
-    // Lateral centrifugal acceleration to counteract roll during turning:
-    // When driving forward (vx) and turning (wz), lateral acceleration is wz * vx.
+    // Lateral centripetal acceleration in body frame: a_y = wz * vx.
+    // The resulting centrifugal inertial force on the body points in -Y (for wz*vx > 0).
+    // In ISO frame (X fwd, Y left, Z up), leaning inward into a left turn requires
+    // negative roll (left side drops, right side rises).
+    // Eq (8): theta_b^d = -arctan(alpha_c_lateral / g)
     double alpha_c_lateral = wz * vx;
 
-    // Desired bank angle theta_b^d = arctan(alpha_c / g) (Eq 8)
-    double bank = std::atan2(alpha_c_lateral, 9.81);
+    // Desired inward bank angle
+    double bank = -std::atan2(alpha_c_lateral, 9.81);
 
     // Clamp to maximum allowable bank
     bank = std::clamp(bank, -params_.max_bank_angle, params_.max_bank_angle);

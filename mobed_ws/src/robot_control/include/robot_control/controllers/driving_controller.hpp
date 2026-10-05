@@ -21,7 +21,8 @@ struct DrivingControllerParams {
 
     // ---- Bank Angle Calculator (Eq 8 in paper) ----
     // Maximum allowable bank angle (roll induced by centripetal force)
-    double max_bank_angle = 0.26;  // rad (~15 deg)
+    // 0.20 rad (~11.5 deg) preserves >= 2cm vertical stroke margin at 0.18m nominal height
+    double max_bank_angle = 0.20;  // rad (~11.5 deg)
     // Height of center of gravity above ground (used for bank angle calc)
     double cog_height = 0.18;     // m, approximate CoG height
     // Low-pass filter coefficient for smoothing bank angle transitions
@@ -55,13 +56,30 @@ public:
     /**
      * @brief Get the bank angle (roll) induced by centripetal force during turning.
      *
-     * Computes the optimal chassis roll angle to counteract centripetal force
+     * Computes the optimal chassis roll angle to counteract centrifugal force
      * during curved motion, similar to a motorcycle leaning into a turn.
-     * (Paper Eq 8)
+     * (Paper Section III.D & Eq 8)
      *
-     * @return double  Desired bank roll angle (rad), positive = lean right
+     * Sign convention (ISO 8855: X forward, Y left, Z up):
+     * - Left turn (wz * vx > 0): returns negative roll (leans left / inward)
+     * - Right turn (wz * vx < 0): returns positive roll (leans right / inward)
+     *
+     * @return double  Desired bank roll angle (rad)
      */
     double getBankAngle() const { return filtered_bank_angle_; }
+
+    /**
+     * @brief Compute the raw bank angle from current motion state.
+     *
+     * Uses the centripetal force formula (Paper Eq 8):
+     *   tan(bank_angle) = v^2 / (R * g) = v * omega / g
+     *
+     * where v = linear speed, omega = yaw rate, g = gravity.
+     *
+     * @param cmd_vel  Current velocity command [vx, vy, omega_z]
+     * @return double  Raw bank angle (rad)
+     */
+    double computeBankAngle(const Eigen::Vector3d& cmd_vel) const;
 
     void reset() { initialized_ = false; filtered_bank_angle_ = 0.0; zero_cmd_duration_ = 0.0; }
 
@@ -87,19 +105,6 @@ private:
      * @param current_ecc Current eccentric posture angle (rad)
      */
     void applySteerConstraint(int leg_index, double& steer, double& speed, double current_ecc) const;
-
-    /**
-     * @brief Compute the raw bank angle from current motion state.
-     *
-     * Uses the centripetal force formula (Paper Eq 8):
-     *   tan(bank_angle) = v^2 / (R * g) = v * omega / g
-     *
-     * where v = linear speed, omega = yaw rate, g = gravity.
-     *
-     * @param cmd_vel  Current velocity command [vx, vy, omega_z]
-     * @return double  Raw bank angle (rad)
-     */
-    double computeBankAngle(const Eigen::Vector3d& cmd_vel) const;
 };
 
 }  // namespace controllers

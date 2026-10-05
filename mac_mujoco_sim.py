@@ -22,6 +22,7 @@ import socket
 import json
 import time
 import select
+import numpy as np
 
 import os
 import sys
@@ -137,13 +138,20 @@ def main():
                     state_vel = get_joint_velocities(model, data)
                     state_eff = get_joint_efforts(model, data)
                     chassis_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, 'chassis')
+                    
+                    # Physical IMU measures specific force in body frame: f_body = R_B^T * (a_world - g_world)
+                    chassis_xmat = data.xmat[chassis_id].reshape(3, 3)
+                    acc_world = np.array(data.cacc[chassis_id][3:6])
+                    g_world = np.array([0.0, 0.0, -9.81])
+                    specific_force_body = chassis_xmat.T @ (acc_world - g_world)
+
                     imu_data = {
                         'quat': [float(data.qpos[3]), float(data.qpos[4]),
                                  float(data.qpos[5]), float(data.qpos[6])],  # [qw, qx, qy, qz]
                         'omega': [float(data.qvel[3]), float(data.qvel[4]), float(data.qvel[5])],
-                        'acc': [float(data.cacc[chassis_id][3]),
-                                float(data.cacc[chassis_id][4]),
-                                float(data.cacc[chassis_id][5])]
+                        'acc': [float(specific_force_body[0]),
+                                float(specific_force_body[1]),
+                                float(specific_force_body[2])]
                     }
                     payload = {
                         'state':    state_pos,   # joint positions  [12]

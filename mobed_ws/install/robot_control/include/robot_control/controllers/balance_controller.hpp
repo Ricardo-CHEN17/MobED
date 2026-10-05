@@ -110,6 +110,16 @@ public:
 
     void reset() { initialized_ = false; }
 
+    /**
+     * @brief Compute slope- and bank-adaptive nominal height (Headroom Management).
+     *
+     * Automatically lowers nominal chassis height on slopes or during sharp banked turns
+     * so that downhill/outside legs do not exceed max_height (0.22m), enabling full
+     * bilateral leveling authority and compliance without singularity.
+     */
+    double computeAdaptiveNominalHeight(
+        double target_height, double pitch_slope, double roll_slope, double commanded_roll = 0.0) const;
+
 private:
     BalanceControllerParams params_;
     RobotParams robot_params_;
@@ -126,15 +136,6 @@ private:
     bool initialized_ = false;
     double time_since_init_ = 0.0;
     const double STARTUP_DURATION = 3.0; // 3 seconds to smoothly stand up
-
-    /**
-     * @brief Compute slope-adaptive nominal height (Headroom Management).
-     *
-     * Automatically lowers nominal chassis height on slopes so that downhill legs
-     * do not exceed max_height (0.22m), enabling full bilateral leveling authority.
-     */
-    double computeAdaptiveNominalHeight(
-        double target_height, double pitch_slope, double roll_slope) const;
 
     /**
      * @brief Compute gain scheduling weights (Paper Eq 16-17).
