@@ -45,19 +45,23 @@
 
     <body name="chassis" pos="0 0 0">
       <freejoint name="root" />
-      <inertial pos="0.0019047851 0 0.049093719" mass="14.996783" quat="1 0 0 0" diaginertia="0.20788229 0.20788229 0.39976801" />
+      <inertial pos="0.0019 0.0 0.080" mass="16.598" quat="1 0 0 0" diaginertia="0.230 0.230 0.440" />
       
-      <geom name="front_nose" type="box" size="0.16 0.05 0.02" pos="0.15 0 0.05" rgba="1 0 0 1" contype="0" conaffinity="0" />
+      <!-- Visual only: no collision, no mass -->
+      <geom name="front_nose" type="box" size="0.16 0.05 0.02" pos="0.15 0 0.05" rgba="1 0 0 1" contype="0" conaffinity="0" group="1" />
+      <geom name="chassis_collision" type="box" size="0.18 0.13 0.035" pos="0 0 0.03" contype="1" conaffinity="1" friction="0.8 0.005 0.0001" group="0" rgba="0.8 0.8 0.8 0.5" />
 
       <geom name="chassis_mesh_1" type="mesh" mesh="part_001_solid_001" pos="0 0.0090937195 0.0019047852" euler="0 0 0" group="1" contype="0" conaffinity="0" />
       <body name="Steering_joint_LF" pos="0.15190479 0.15 0.0090937195" euler="0 0 1.5707963">
         <joint name="Steering_joint_LF" type="hinge" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-200 200" actuatorfrclimited="true" />
         <inertial pos="0.0016718354 -2.1252266e-06 -0.028065513" mass="1.536995" quat="0.9981442 4.7558172e-05 0.060894316 -0.00020962731" diaginertia="0.00097712 0.00109524 0.00130314" />
         <geom name="Steering_joint_LF_mesh_1" type="mesh" mesh="part_002_solid_002" rgba="1 0.2 0.2 1" pos="-0.14090628 0.15190479 -0.0071889343" euler="0 0 -1.5707963" group="1" contype="0" conaffinity="0" />
+        <geom name="steer_col_LF" type="cylinder" size="0.035 0.035" pos="0 0 -0.02" contype="1" conaffinity="1" friction="0.8 0.005 0.0001" group="0" rgba="0.8 0.2 0.2 0.5" />
         <body name="Posture_control_joint_LF" pos="0.046069665 0 -0.045" euler="-1.5707963 -1.5707963 0">
           <joint name="Posture_control_joint_LF" type="hinge" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-200 200" actuatorfrclimited="true" />
           <inertial pos="-0.035491101 -0.01210916 -0.013991309" mass="1.061999" quat="0.98651643 0 0 0.16366223" diaginertia="0.00008364 0.00087668 0.00094262" />
           <geom name="Posture_control_joint_LF_mesh_1" type="mesh" mesh="part_003_solid_003" pos="0.15190479 -0.037811066 0.18697595" euler="1.5707963 0 -3.1415927" group="1" contype="0" conaffinity="0" />
+          <geom name="ecc_arm_col_LF" type="capsule" fromto="0 0 0 -0.071 -0.024 -0.019" size="0.02" contype="1" conaffinity="1" friction="0.8 0.005 0.0001" group="0" rgba="0.8 0.4 0.2 0.5" />
           <body name="Wheel_joint_LF" pos="-0.070982202 -0.02421832 -0.018991302" euler="3.1415927 0 0">
             <joint name="Wheel_joint_LF" type="hinge" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-200 200" actuatorfrclimited="true" />
             <inertial pos="1.2736975e-10 0 0.010000008" mass="0.75153473" quat="0.99861458 0 0 0.052620487" diaginertia="0.0018977931 0.001897793 0.0037454838" />
@@ -69,10 +73,12 @@
         <joint name="Steering_joint_RF" type="hinge" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-200 200" actuatorfrclimited="true" />
         <inertial pos="-0.0016718342 2.12478e-06 -0.028065513" mass="1.536995" quat="0.9981442 -4.7530235e-05 -0.060894308 -0.00020965858" diaginertia="0.00097712 0.00109524 0.00130314" />
         <geom name="Steering_joint_RF_mesh_1" type="mesh" mesh="part_007_solid_007" rgba="0.2 1 0.2 1" pos="0.15909372 0.15190479 -0.0071889343" euler="0 0 -1.5707963" group="1" contype="0" conaffinity="0" />
+        <geom name="steer_col_RF" type="cylinder" size="0.035 0.035" pos="0 0 -0.02" contype="1" conaffinity="1" friction="0.8 0.005 0.0001" group="0" rgba="0.2 0.8 0.2 0.5" />
         <body name="Posture_control_joint_RF" pos="-0.060060967 0 -0.045" euler="1.5707963 1.5707963 0">
           <joint name="Posture_control_joint_RF" type="hinge" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-200 200" actuatorfrclimited="true" />
           <inertial pos="0.0033361432 0.037351307 -7.573517e-09" mass="1.061999" quat="0.99900822 0 0 -0.044526062" diaginertia="0.00087668 0.00008364 0.00094262" />
           <geom name="Posture_control_joint_RF_mesh_1" type="mesh" mesh="part_010_solid_010" pos="0.15190479 0.037811066 0.21915469" euler="-1.5707963 0 -3.1415927" group="1" contype="0" conaffinity="0" />
+          <geom name="ecc_arm_col_RF" type="capsule" fromto="0 0 0 0.007 0.075 -0.005" size="0.02" contype="1" conaffinity="1" friction="0.8 0.005 0.0001" group="0" rgba="0.2 0.8 0.4 0.5" />
           <body name="Wheel_joint_RF" pos="0.0066722838 0.074702615 -0.005" euler="-3.1415927 0 0">
             <joint name="Wheel_joint_RF" type="hinge" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-200 200" actuatorfrclimited="true" />
             <inertial pos="-9.5305775e-10 -3.2682827e-10 0.010000008" mass="0.75153475" quat="0.93536482 0 0 -0.3536844" diaginertia="0.0018977931 0.0018977931 0.003745484" />
@@ -84,10 +90,12 @@
         <joint name="Steering_joint_LB" type="hinge" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-200 200" actuatorfrclimited="true" />
         <inertial pos="0.0016718342 -2.1248272e-06 -0.028065513" mass="1.536995" quat="0.9981442 4.7518247e-05 0.060894305 -0.00020975219" diaginertia="0.00097712 0.00109524 0.00130314" />
         <geom name="Steering_joint_LB_mesh_1" type="mesh" mesh="part_005_solid_005" pos="-0.14090628 -0.14809521 -0.0071889343" euler="0 0 -1.5707963" group="1" contype="0" conaffinity="0" />
+        <geom name="steer_col_LB" type="cylinder" size="0.035 0.035" pos="0 0 -0.02" contype="1" conaffinity="1" friction="0.8 0.005 0.0001" group="0" rgba="0.8 0.2 0.8 0.5" />
         <body name="Posture_control_joint_LB" pos="0.060060967 0 -0.045" euler="-1.5707963 -1.5707963 0">
           <joint name="Posture_control_joint_LB" type="hinge" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-200 200" actuatorfrclimited="true" />
           <inertial pos="0.037472079 0.0014468008 -7.5886705e-09" mass="1.061999" quat="0.99981385 0 0 0.019294275" diaginertia="0.00008364 0.00087668 0.00094262" />
           <geom name="Posture_control_joint_LB_mesh_1" type="mesh" mesh="part_008_solid_008" pos="-0.14809521 -0.037811066 0.20096725" euler="1.5707963 0 -3.1415927" group="1" contype="0" conaffinity="0" />
+          <geom name="ecc_arm_col_LB" type="capsule" fromto="0 0 0 0.075 0.003 -0.005" size="0.02" contype="1" conaffinity="1" friction="0.8 0.005 0.0001" group="0" rgba="0.8 0.4 0.8 0.5" />
           <body name="Wheel_joint_LB" pos="0.07494416 0.0028936022 -0.005" euler="3.1415927 0 0">
             <joint name="Wheel_joint_LB" type="hinge" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-200 200" actuatorfrclimited="true" />
             <inertial pos="0 4.5386143e-10 0.010000008" mass="0.75153474" quat="0.93171755 0 0 -0.36318371" diaginertia="0.0018977931 0.001897793 0.0037454838" />
@@ -99,10 +107,12 @@
         <joint name="Steering_joint_RB" type="hinge" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-200 200" actuatorfrclimited="true" />
         <inertial pos="-0.0016718354 2.1246811e-06 -0.028065513" mass="1.536995" quat="0.9981442 -4.756718e-05 -0.06089431 -0.00020963633" diaginertia="0.00097712 0.00109524 0.00130314" />
         <geom name="Steering_joint_RB_mesh_1" type="mesh" mesh="part_006_solid_006" pos="0.15909372 -0.14809521 -0.0071889343" euler="0 0 -1.5707963" group="1" contype="0" conaffinity="0" />
+        <geom name="steer_col_RB" type="cylinder" size="0.035 0.035" pos="0 0 -0.02" contype="1" conaffinity="1" friction="0.8 0.005 0.0001" group="0" rgba="0.2 0.2 0.8 0.5" />
         <body name="Posture_control_joint_RB" pos="-0.060060967 0 -0.045" euler="1.5707963 1.5707963 0">
           <joint name="Posture_control_joint_RB" type="hinge" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-200 200" actuatorfrclimited="true" />
           <inertial pos="0.0035230026 0.037334146 -7.5735161e-09" mass="1.061999" quat="0.99889369 0 0 -0.047025398" diaginertia="0.00087668 0.00008364 0.00094262" />
           <geom name="Posture_control_joint_RB_mesh_1" type="mesh" mesh="part_009_solid_009" pos="-0.14809521 0.037811066 0.21915469" euler="-1.5707963 0 -3.1415927" group="1" contype="0" conaffinity="0" />
+          <geom name="ecc_arm_col_RB" type="capsule" fromto="0 0 0 0.007 0.075 -0.005" size="0.02" contype="1" conaffinity="1" friction="0.8 0.005 0.0001" group="0" rgba="0.2 0.4 0.8 0.5" />
           <body name="Wheel_joint_RB" pos="0.0070460026 0.074668292 -0.005" euler="-3.1415927 0 0">
             <joint name="Wheel_joint_RB" type="hinge" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-200 200" actuatorfrclimited="true" />
             <inertial pos="-1.2465447e-09 -5.7382597e-10 0.010000008" mass="0.75153475" quat="0.99454652 0 0 -0.10429394" diaginertia="0.0018977932 0.0018977931 0.003745484" />
@@ -113,7 +123,7 @@
     </body>
   </worldbody>
   <keyframe>
-    <key name="home" qpos="0 0 0.35 1 0 0 0 -0.0000 -1.9164 -3.5443 0.1599 -3.0159 1.8035 -0.0013 1.5080 4.1867 -0.0069 -3.0474 -0.7472" />
+    <key name="home" qpos="0 0 0.35 1 0 0 0 0.0 -1.2568 0.0 0.0 -3.6961 0.0 0.0 0.8885 0.0 0.0 -2.4038 0.0" />
   </keyframe>
   <actuator>
     <position name="act_steer_FL" joint="Steering_joint_LF" kp="300" kv="30" ctrllimited="true" ctrlrange="-3.14 3.14" />

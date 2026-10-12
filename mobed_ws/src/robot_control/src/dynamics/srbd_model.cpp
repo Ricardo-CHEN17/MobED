@@ -10,6 +10,33 @@ SrbdModel::SrbdModel(const RobotParams& params)
     for (auto& cp : contact_points_) {
         cp.setZero();
     }
+    current_total_mass_ = params_.total_mass;
+    current_inertia_ = params_.inertia;
+    setPayload(params_.payload_mass, params_.payload_com_z_offset);
+}
+
+void SrbdModel::setPayload(double payload_mass, double payload_z_offset) {
+    payload_mass_ = std::max(0.0, payload_mass);
+    payload_z_offset_ = payload_z_offset;
+
+    double m_robot = params_.total_mass;
+    current_total_mass_ = m_robot + payload_mass_;
+
+    // Center of mass shift along Z (Section II.B & III.E.2)
+    com_z_shift_ = (payload_mass_ * payload_z_offset_) / current_total_mass_;
+
+    // Parallel axis theorem shift:
+    // Distance from robot base CoM (0,0,0) to composite CoM (0,0,com_z_shift_) is com_z_shift_
+    // Distance from payload CoM (0,0,payload_z_offset_) to composite CoM is (payload_z_offset_ - com_z_shift_)
+    double d_robot = com_z_shift_;
+    double d_payload = payload_z_offset_ - com_z_shift_;
+
+    // Additional moment of inertia about composite CoM (pitch & roll axes X and Y)
+    double delta_I_xy = m_robot * (d_robot * d_robot) + payload_mass_ * (d_payload * d_payload);
+
+    current_inertia_ = params_.inertia;
+    current_inertia_(0, 0) += delta_I_xy;  // Roll inertia
+    current_inertia_(1, 1) += delta_I_xy;  // Pitch inertia
 }
 
 Eigen::Matrix3d SrbdModel::skew(const Eigen::Vector3d& v) {
@@ -55,27 +82,6 @@ void SrbdModel::buildDynamicsConstraints(
     Eigen::MatrixXd& A,
     Eigen::VectorXd& b) const
 {
-    // ================================================================
-    // Newton-Euler Equations (Paper Eq 10-12)
-    //
-    // Newton (linear):
-    //   m * a_d = sum_i(f_i) + m * g
-    //   => sum_i(f_i) = m * (a_d - g)
-    //
-    // Since we only optimize vertical GRF (f_z,i), each contact force
-    // is f_i = [0, 0, f_z,i]^T (assuming flat contact, vertical only).
-    //
-    // Euler (angular):
-    //   I * alpha_d + omega x (I * omega) = sum_i(r_i x f_i)
-    //   => sum_i(r_i x f_i) = I * alpha_d + omega x (I * omega)
-    //
-    // where r_i = p_contact,i - p_CoM (vector from CoM to contact point)
-    //
-    // Assemble into: A * f_z = b
-    //   A is 6 x n_contact
-    //   b is 6 x 1
-    // ================================================================
-
     auto contact_indices = getContactLegIndices();
     int n_contact = static_cast<int>(contact_indices.size());
 
@@ -88,40 +94,34 @@ void SrbdModel::buildDynamicsConstraints(
         return;
     }
 
-    double m = params_.total_mass;
+    double m = current_total_mass_;
     Eigen::Vector3d gravity(0.0, 0.0, -params_.gravity);
     Eigen::Matrix3d R = body_state_.orientation.toRotationMatrix();
-    Eigen::Matrix3d I_world = R * params_.inertia * R.transpose();
+    Eigen::Matrix3d I_world = R * current_inertia_ * R.transpose();
     Eigen::Vector3d omega = body_state_.angular_velocity;
 
     // ---- Build b vector (desired wrench) ----
-    // Linear part: m * (a_desired - g)
+    // Linear part: m * (a_desired - g) (Paper Eq 11)
     b.head<3>() = m * (desired_linear_accel - gravity);
 
-    // Angular part: I * alpha_desired + omega x (I * omega)
-    b.tail<3>() = I_world * desired_angular_accel + omega.cross(I_world * omega);
+    // Active load transfer feedforward: planar accelerations (ax, ay) acting at CoM height
+    // produce inertial pitching and rolling moments that vertical GRFs must counteract.
+    // tau_load_transfer = r_com x (m * a_desired_planar)
+    double z_com = body_state_.position.z() + (R * Eigen::Vector3d(0.0, 0.0, com_z_shift_)).z();
+    Eigen::Vector3d a_planar(desired_linear_accel.x(), desired_linear_accel.y(), 0.0);
+    Eigen::Vector3d tau_inertial = Eigen::Vector3d(0.0, 0.0, z_com).cross(m * a_planar);
 
-    // ---- Build A matrix (force-to-wrench mapping) ----
-    // For each contact leg i with vertical force f_z,i:
-    //   Force contribution: [0, 0, f_z,i]^T
-    //   Torque contribution: r_i x [0, 0, f_z,i]^T = [r_iy * f_z,i, -r_ix * f_z,i, 0]
-    //
-    // Column j of A (for contact leg j):
-    //   A(0,j) = 0        (fx contribution from f_z)
-    //   A(1,j) = 0        (fy contribution from f_z)
-    //   A(2,j) = 1        (fz contribution from f_z)
-    //   A(3,j) = r_iy     (torque_x from r x [0,0,fz])
-    //   A(4,j) = -r_ix    (torque_y from r x [0,0,fz])
-    //   A(5,j) = 0        (torque_z from r x [0,0,fz])
+    // Angular part: I * alpha_desired + omega x (I * omega) + tau_inertial
+    b.tail<3>() = I_world * desired_angular_accel + omega.cross(I_world * omega) + tau_inertial;
 
-    Eigen::Vector3d p_com = body_state_.position;
+    // Composite CoM in world frame
+    Eigen::Vector3d p_com = body_state_.position + R * Eigen::Vector3d(0.0, 0.0, com_z_shift_);
 
     for (int j = 0; j < n_contact; ++j) {
         int leg_idx = contact_indices[j];
         Eigen::Vector3d r_i = contact_points_[leg_idx] - p_com;
 
         // A_i * ^B f_i = [ I ; [r_i]x ] * R * [0, 0, f_z,i]^T (Eq 11 in paper)
-        // R.col(2) is R * [0, 0, 1]^T
         Eigen::Vector3d f_dir = R.col(2);
         Eigen::Vector3d tau_dir = r_i.cross(f_dir);
 

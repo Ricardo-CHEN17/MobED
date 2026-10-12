@@ -5,6 +5,7 @@
 #include <cmath>
 #include <tuple>
 #include <iostream>
+#include "robot_control/core/mobed_types.hpp"
 
 namespace robot_control {
 namespace kinematics {
@@ -49,13 +50,14 @@ public:
         const Eigen::Vector4d& current_ecc_angles) const;
 
     /**
-     * @brief Compute Posture Inverse Kinematics (Exact Non-linear Solution)
+     * @brief Compute Posture Inverse Kinematics (Exact Non-linear Solution, Section III.E.3)
      * 
      * @param target_height Target distance from ground to base origin
      * @param target_roll Target roll angle (radians)
      * @param target_pitch Target pitch angle (radians)
      * @param current_steer_angles [FL, FR, RL, RR] Steering angles needed for exact geometric projection
-     * @param outward_config If true, uses q_ecc > 0 (wheels outward). Else wheels inward.
+     * @param R_T Terrain plane rotation matrix
+     * @param config Posture configuration (OUTWARD, INWARD, SPIN per Section II.B & Fig 5)
      * @return Eigen::Vector4d Target eccentric angles [FL, FR, RL, RR]
      */
     Eigen::Vector4d computePostureIK(
@@ -64,7 +66,20 @@ public:
         double target_pitch,
         const Eigen::Vector4d& current_steer_angles,
         const Eigen::Matrix3d& R_T,
-        bool outward_config = true) const;
+        PostureConfiguration config = PostureConfiguration::OUTWARD) const;
+
+    // Backward-compatible overload for boolean outward_config
+    Eigen::Vector4d computePostureIK(
+        double target_height, 
+        double target_roll, 
+        double target_pitch,
+        const Eigen::Vector4d& current_steer_angles,
+        const Eigen::Matrix3d& R_T,
+        bool outward_config) const {
+        return computePostureIK(target_height, target_roll, target_pitch,
+                                current_steer_angles, R_T,
+                                outward_config ? PostureConfiguration::OUTWARD : PostureConfiguration::INWARD);
+    }
 
     /**
      * @brief Compute the 3D position of wheel contact point in Base frame (Eq 2)

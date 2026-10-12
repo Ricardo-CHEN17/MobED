@@ -17,6 +17,8 @@ Joint ordering (both directions):
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState, Imu
+from robot_interfaces.msg import MobEDCommand
+from std_msgs.msg import Bool, Int32, Float64
 import socket
 import json
 import time
@@ -37,6 +39,11 @@ class UdpInterfaceNode(Node):
 
         # ---------- UDP setup ----------
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+        except (AttributeError, OSError):
+            pass
         self.sock.bind(('0.0.0.0', 9001))
         self.sock.setblocking(False)
 
@@ -48,6 +55,18 @@ class UdpInterfaceNode(Node):
         self.pub_imu = self.create_publisher(Imu, '/imu', 10)
         self.sub_cmds = self.create_subscription(
             JointState, '/mobed/joint_commands', self._cmd_callback, 10)
+
+        # ---------- ROS2 teleop publishers (from Mac MuJoCo HUD/Window) ----------
+        self.pub_cmd = self.create_publisher(MobEDCommand, '/mobed/command', 10)
+        self.pub_posture = self.create_publisher(Int32, '/mobed/posture_mode', 10)
+        self.pub_curb_height = self.create_publisher(Float64, '/mobed/curb_height', 10)
+        self.pub_climb_mode = self.create_publisher(Int32, '/mobed/climb_mode', 10)
+        self.pub_estop = self.create_publisher(Bool, '/e_stop', 10)
+
+        self.prev_posture = None
+        self.prev_curb_height = None
+        self.prev_climb_mode = None
+        self.prev_estop = None
 
         # ---------- 100 Hz poll timer ----------
         self.poll_timer = self.create_timer(0.01, self._poll_udp)
@@ -94,16 +113,21 @@ class UdpInterfaceNode(Node):
     # Upstream: Mac  -->  UDP JSON  -->  ROS2 /joint_states
     # ------------------------------------------------------------------
     def _poll_udp(self):
-        """Drain all pending UDP packets; publish the latest state and IMU."""
+        """Drain all pending UDP packets; publish the latest state, IMU, and teleop."""
         latest_state = None
         latest_velocity = None
         latest_effort = None
         latest_imu = None
+        latest_teleop = None
 
         # Drain — always consume everything so the buffer never grows stale
         while True:
             try:
-                data, _ = self.sock.recvfrom(4096)
+                data, addr = self.sock.recvfrom(4096)
+                if addr and addr[0] == '127.0.0.1':
+                    self.mac_addr = addr
+                else:
+                    self.mac_addr = ('host.docker.internal', 9000)
                 parsed = json.loads(data.decode('utf-8'))
                 if 'state' in parsed and len(parsed['state']) == 12:
                     latest_state = parsed['state']
@@ -113,6 +137,8 @@ class UdpInterfaceNode(Node):
                     latest_effort = parsed['effort']
                 if 'imu' in parsed and isinstance(parsed['imu'], dict):
                     latest_imu = parsed['imu']
+                if 'teleop' in parsed and isinstance(parsed['teleop'], dict):
+                    latest_teleop = parsed['teleop']
             except BlockingIOError:
                 break  # nothing left in buffer
             except (json.JSONDecodeError, UnicodeDecodeError):
@@ -135,6 +161,52 @@ class UdpInterfaceNode(Node):
                 'No UDP data from Mac for >0.5 s — publishing zero state',
                 throttle_duration_sec=2.0)
             self._publish_joint_states([0.0] * 12, None, None)
+
+        if latest_teleop is not None:
+            self._publish_teleop(latest_teleop)
+
+    def _publish_teleop(self, t: dict):
+        """Publish teleop commands received from Mac MuJoCo viewer."""
+        cmd = MobEDCommand()
+        cmd.twist.linear.x = float(t.get('vx', 0.0))
+        cmd.twist.linear.y = float(t.get('vy', 0.0))
+        cmd.twist.angular.z = float(t.get('wz', 0.0))
+        cmd.body_height = float(t.get('height', 0.18))
+        cmd.body_roll = float(t.get('roll', 0.0))
+        cmd.body_pitch = float(t.get('pitch', 0.0))
+        self.pub_cmd.publish(cmd)
+
+        posture = t.get('posture_mode')
+        if posture is not None and posture != self.prev_posture:
+            msg = Int32()
+            msg.data = int(posture)
+            self.pub_posture.publish(msg)
+            self.prev_posture = posture
+            self.get_logger().info(f'[Teleop] Forwarded Posture Mode -> {posture}')
+
+        curb = t.get('curb_height')
+        if curb is not None and (self.prev_curb_height is None or abs(curb - self.prev_curb_height) > 1e-4):
+            msg = Float64()
+            msg.data = float(curb)
+            self.pub_curb_height.publish(msg)
+            self.prev_curb_height = curb
+            self.get_logger().info(f'[Teleop] Forwarded Curb Height -> {curb:.3f} m')
+
+        climb = t.get('climb_mode')
+        if climb is not None and climb != self.prev_climb_mode:
+            msg = Int32()
+            msg.data = int(climb)
+            self.pub_climb_mode.publish(msg)
+            self.prev_climb_mode = climb
+            self.get_logger().info(f'[Teleop] Forwarded Climb Mode -> {climb}')
+
+        estop = t.get('e_stop')
+        if estop is not None and estop != self.prev_estop:
+            msg = Bool()
+            msg.data = bool(estop)
+            self.pub_estop.publish(msg)
+            self.prev_estop = estop
+            self.get_logger().info(f'[Teleop] Forwarded E-Stop -> {estop}')
 
     def _publish_joint_states(self, positions: list, velocities: list = None, efforts: list = None):
         """Publish a JointState message with positions, velocities, and efforts.

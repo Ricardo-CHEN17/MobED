@@ -72,3 +72,22 @@ htmlcov/
 .env
 .env.local
 log/
+
+# ==========================================
+# 原始模型与大型 CAD 源文件 (CAD / Sources)
+# ==========================================
+sources/*.stp
+sources/*.step
+sources/RMUC2026_V2.0.0.stp
+source/
+!sources/仿真模型.stp
+
+# ==========================================
+# ROS 2 工作空间与测试临时文件 (ROS 2 / Scratch)
+# ==========================================
+mobed_ws/build/
+mobed_ws/install/
+mobed_ws/log/
+scratch/
+*_rendered.png
+track_cam_*.png

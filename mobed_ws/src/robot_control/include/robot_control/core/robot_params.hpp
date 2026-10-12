@@ -12,14 +12,15 @@ struct RobotParams {
     // Mass & Inertia (Aligned with Paper Section II.B & III.E)
     // -----------------------------------------------
     // Body platform weight derived from MuJoCo inertial entries:
-    //   chassis: 14.997 kg, 4x steering: 4x1.537=6.148 kg,
+    //   chassis: 16.598 kg, 4x steering: 4x1.537=6.148 kg,
     //   4x eccentric arm: 4x1.062=4.248 kg, 4x wheel: 4x0.752=3.008 kg
-    //   Total: 14.997 + 6.148 + 4.248 + 3.008 = 28.401 kg
-    double body_mass = 21.4;     // kg, chassis + steering + eccentric arms (no wheels)
+    //   Total: 16.598 + 6.148 + 4.248 + 3.008 = 30.002 kg
+    double body_mass = 27.0;     // kg, chassis + steering + eccentric arms (no wheels)
     // Current payload mass carried by the robot (up to 56.0 kg per paper)
     double payload_mass = 0.0;   // kg, default to unladen
+    double payload_com_z_offset = 0.15; // m, payload CoM height above chassis origin (Section II.B & IV.A)
     // Total mass m = body_mass + wheel_mass (Eq 11)
-    double total_mass = 28.4;    // kg, calibrated against MuJoCo physical model
+    double total_mass = 30.0;    // kg, calibrated against MuJoCo physical model
     // Body inertia tensor about CoM, in body frame (kg·m²)
     // Approximate values — must be refined from CAD or system identification
     Eigen::Matrix3d inertia = (Eigen::Matrix3d() <<
@@ -60,12 +61,15 @@ struct RobotParams {
     double gravity = 9.81;  // m/s^2
 
     // -----------------------------------------------
-    // EKF Tuning Parameters
+    // EKF Tuning Parameters (15-State ESKF with Online Bias Estimation, Paper Section III.C.1)
     // -----------------------------------------------
     // Process noise covariance diagonal elements
-    double ekf_process_noise_pos    = 0.01;   // position uncertainty growth rate
-    double ekf_process_noise_vel    = 0.1;    // velocity uncertainty growth rate
-    double ekf_process_noise_orient = 0.001;  // orientation uncertainty growth rate
+    double ekf_process_noise_pos        = 0.01;   // position uncertainty growth rate
+    double ekf_process_noise_vel        = 0.1;    // velocity uncertainty growth rate
+    double ekf_process_noise_orient     = 0.001;  // orientation uncertainty growth rate
+    double ekf_process_noise_accel_bias = 0.0001; // (m/s^2)^2/s, accel bias random walk
+    double ekf_process_noise_gyro_bias  = 0.00001;// (rad/s)^2/s, gyro bias random walk
+    double ekf_initial_bias_cov         = 0.01;   // initial bias estimation variance
 
     // Measurement noise covariance diagonal elements
     double ekf_meas_noise_accel     = 0.5;    // accelerometer noise (m/s^2)
@@ -75,16 +79,16 @@ struct RobotParams {
     // -----------------------------------------------
     // Contact Detection Parameters (Multi-Modal Model)
     // -----------------------------------------------
-    double contact_torque_threshold      = 9.0;    // Nm, sustained effort load for obstacle collision confirmation (calibrated for 5cm curbs)
-    double contact_torque_rate_threshold = 120.0;  // Nm/s, shock onset rate threshold to arm observation window
+    double contact_torque_threshold      = 2.0;    // Nm, sustained effort load for obstacle collision confirmation (Mode 1 curb ~2.4Nm, Mode 2 wall ~7.8Nm, flat <0.8Nm)
+    double contact_torque_rate_threshold = 25.0;   // Nm/s, shock onset rate threshold to arm observation window (smooth approach ~35 Nm/s, flat <5 Nm/s)
     double shock_window_duration         = 0.35;   // s, transient shock observation window (ample margin for motor ramp-up)
-    double sustain_confirm_duration      = 0.10;   // s, required sustained load duration to confirm impact (10 frames at 100Hz, immune to small bumps)
-    double wheel_stall_torque_threshold  = 7.0;    // Nm, drive wheel resistance confirmation (flat ground is < 2.0 Nm)
-    double wheel_stall_vel_threshold     = 0.5;    // rad/s (~0.03 m/s), maximum wheel rotation speed under true curb stall
+    double sustain_confirm_duration      = 0.05;   // s, required sustained load duration to confirm impact (5 frames at 100Hz)
+    double wheel_stall_torque_threshold  = 3.0;    // Nm, drive wheel resistance confirmation (flat ground is < 1.8 Nm)
+    double wheel_stall_vel_threshold     = 0.8;    // rad/s, maximum wheel rotation speed under true curb stall
     double ramp_inhibit_slope_threshold  = 0.078;  // rad (~4.5 deg), pure pitch slope steeper than this inhibits stair climbing
     double ramp_inhibit_pitch_threshold  = 0.087;  // rad (~5.0 deg), instantaneous IMU pitch threshold (Track 1A ramp is 11.3 deg)
     double ramp_inhibit_pitch_rate_threshold = 0.25;   // rad/s (~14.3 deg/s), instantaneous IMU pitch rate threshold
-    double chassis_blocked_vel_threshold = 0.06;   // m/s, forward chassis speed threshold indicating true rigid blockage
+    double chassis_blocked_vel_threshold = 0.05;   // m/s, forward chassis speed threshold indicating true rigid blockage (accounts for differential slip)
 
     // -----------------------------------------------
     // Terrain Filter & Micro-Bump Decoupling Parameters

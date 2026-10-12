@@ -24,11 +24,12 @@ target_include_directories(mobed_kinematics PUBLIC
 )
 target_include_directories(mobed_kinematics SYSTEM PUBLIC ${EIGEN3_INCLUDE_DIRS})
 
-# Estimation Library (EKF State Estimator + Terrain Estimator + Contact Detector)
+# Estimation Library (EKF State Estimator + Terrain Estimator + Contact Detector + Climb Geometry)
 add_library(mobed_estimation SHARED
   src/estimation/state_estimator.cpp
   src/estimation/terrain_estimator.cpp
   src/estimation/contact_detector.cpp
+  src/estimation/climb_geometry_estimator.cpp
 )
 target_include_directories(mobed_estimation PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -47,10 +48,11 @@ target_include_directories(mobed_dynamics PUBLIC
 )
 target_include_directories(mobed_dynamics SYSTEM PUBLIC ${EIGEN3_INCLUDE_DIRS})
 
-# Tasks Library (FSM Climbing + Trajectory Generator)
+# Tasks Library (FSM Climbing + Trajectory Generator + 200mm High Stair Controller)
 add_library(mobed_tasks SHARED
   src/tasks/trajectory_generator.cpp
   src/tasks/task_controller.cpp
+  src/tasks/high_stair_controller.cpp
 )
 target_include_directories(mobed_tasks PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

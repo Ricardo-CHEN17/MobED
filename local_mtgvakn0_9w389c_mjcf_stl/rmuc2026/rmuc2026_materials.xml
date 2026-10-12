@@ -1,0 +1,50 @@
+<mujoco>
+  <asset>
+    <!-- Sky & Environment -->
+    <texture name="skybox" type="skybox" builtin="gradient" rgb1="0.32 0.45 0.60" rgb2="0.75 0.82 0.90" width="512" height="512" />
+
+    <!-- 2D Procedural & File Textures -->
+    <texture name="tex_pvc" type="2d" file="textures/pvc_floor.png" />
+    <texture name="tex_hazard" type="2d" file="textures/hazard_stripe.png" />
+    <texture name="tex_tag_red" type="2d" file="textures/tag_red.png" />
+    <texture name="tex_tag_blue" type="2d" file="textures/tag_blue.png" />
+    <texture name="tex_r_logo" type="2d" file="textures/r_logo.png" />
+    <texture name="tex_target" type="2d" file="textures/windmill_target.png" />
+    <texture name="tex_fence" type="2d" file="textures/fence_mesh.png" />
+
+    <!-- Procedural Grid for Testing Alignment -->
+    <texture name="tex_grid" type="2d" builtin="checker" width="512" height="512" rgb1="0.22 0.25 0.30" rgb2="0.18 0.20 0.24" />
+
+    <!-- Materials -->
+    <!-- Battlefield Floor: 28m x 15m PVC with anti-skid and controlled friction -->
+    <material name="mat_pvc_floor" texture="tex_pvc" texrepeat="28 15" reflectance="0.05" specular="0.1" />
+    <material name="mat_anti_slip" texture="tex_hazard" texrepeat="2 2" reflectance="0.08" specular="0.15" />
+    <material name="mat_grid_highland" texture="tex_grid" texrepeat="10 10" reflectance="0.06" specular="0.12" />
+
+    <!-- Fencing: Semi-transparent to guarantee clear outside observation while maintaining rigid collision -->
+    <material name="mat_fence" texture="tex_fence" texrepeat="14 3" rgba="0.20 0.23 0.28 0.35" specular="0.2" reflectance="0.05" />
+
+    <!-- Markings & Vision Tags -->
+    <material name="mat_tag_red" texture="tex_tag_red" reflectance="0.1" specular="0.2" />
+    <material name="mat_tag_blue" texture="tex_tag_blue" reflectance="0.1" specular="0.2" />
+    <material name="mat_r_logo" texture="tex_r_logo" reflectance="0.1" specular="0.3" />
+    <material name="mat_target" texture="tex_target" reflectance="0.1" specular="0.3" />
+
+    <!-- Structural Colors -->
+    <material name="mat_wood_dark" rgba="0.28 0.30 0.34 1.0" reflectance="0.04" specular="0.08" />
+    <material name="mat_wood_mid" rgba="0.38 0.42 0.46 1.0" reflectance="0.05" specular="0.1" />
+    <material name="mat_metal_frame" rgba="0.15 0.17 0.20 1.0" reflectance="0.2" specular="0.4" />
+    <material name="mat_metal_pole" rgba="0.55 0.58 0.62 1.0" reflectance="0.3" specular="0.5" />
+
+    <!-- Team Faction Colors (Glowing High-Visibility for Sensors & Human Observer) -->
+    <material name="mat_red_glow" rgba="0.95 0.15 0.15 1.0" emission="0.3" specular="0.5" />
+    <material name="mat_blue_glow" rgba="0.15 0.50 0.95 1.0" emission="0.3" specular="0.5" />
+    <material name="mat_green_glow" rgba="0.10 0.90 0.30 1.0" emission="0.4" specular="0.6" />
+    <material name="mat_amber_glow" rgba="0.95 0.65 0.10 1.0" emission="0.2" specular="0.4" />
+    <material name="mat_armor_plate" rgba="0.10 0.10 0.12 1.0" specular="0.2" />
+
+    <!-- Props Material: 400g Energy Unit -->
+    <material name="mat_energy_unit" rgba="0.75 0.78 0.82 1.0" specular="0.3" reflectance="0.1" />
+    <material name="mat_energy_iron" rgba="0.20 0.22 0.25 1.0" specular="0.5" reflectance="0.2" />
+  </asset>
+</mujoco>

@@ -76,16 +76,16 @@ Eigen::Vector4d MobedKinematics::computePostureIK(
     double target_pitch,
     const Eigen::Vector4d& current_steer_angles,
     const Eigen::Matrix3d& R_T,
-    bool outward_config) const {
+    PostureConfiguration config) const {
     
     Eigen::Vector4d target_ecc_angles;
     
     double safe_height = std::max(params_.min_height, std::min(target_height, params_.max_height));
     
-    // R_B: Rotation from Base to World
+    // R_B: Rotation from Base to World (Standard Tait-Bryan ZYX with zero yaw)
     Eigen::Matrix3d R_B;
-    R_B = Eigen::AngleAxisd(target_roll, Eigen::Vector3d::UnitX())
-        * Eigen::AngleAxisd(target_pitch, Eigen::Vector3d::UnitY());
+    R_B = Eigen::AngleAxisd(target_pitch, Eigen::Vector3d::UnitY())
+        * Eigen::AngleAxisd(target_roll, Eigen::Vector3d::UnitX());
         
     // R_TB: Rotation from Base to Terrain (R_TB = R_T^T * R_B)
     Eigen::Matrix3d R_TB = R_T.transpose() * R_B;
@@ -117,7 +117,7 @@ Eigen::Vector4d MobedKinematics::computePostureIK(
         double sol1 = normalize_angle(std::asin(sin_val) - alpha);
         double sol2 = normalize_angle(M_PI - std::asin(sin_val) - alpha);
         
-        // Strict sign selection & feasible workspace filtering (Eq 15)
+        // Strict sign selection & feasible workspace filtering (Section II.B & III.E.3, Eq 15)
         // Normal operating range: eccentric arm points downwards/backwards to support the chassis.
         // Expanded to 120 deg (2.094 rad) to provide full deep-crouch stroke for 10-12 deg slope leveling.
         double max_angle = 2.094; // ~120 deg
@@ -125,7 +125,15 @@ Eigen::Vector4d MobedKinematics::computePostureIK(
         bool sol2_feasible = std::abs(sol2) <= max_angle;
 
         bool is_front = (i == FL || i == FR);
-        bool target_positive = outward_config ? is_front : !is_front;
+        bool target_positive = true;
+        if (config == PostureConfiguration::OUTWARD) {
+            target_positive = is_front;
+        } else if (config == PostureConfiguration::INWARD) {
+            target_positive = !is_front;
+        } else if (config == PostureConfiguration::SPIN) {
+            // Tangential alignment for in-place spin (Section II.B & Fig 5a 2)
+            target_positive = (i == FL || i == RL);
+        }
 
         double q_ecc;
         if (target_positive) {

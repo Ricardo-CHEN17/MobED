@@ -2,6 +2,9 @@
 #include "sensor_msgs/msg/joint_state.hpp"
 #include "sensor_msgs/msg/imu.hpp"
 #include "std_msgs/msg/bool.hpp"
+#include "std_msgs/msg/float64.hpp"
+#include "std_msgs/msg/int32.hpp"
+#include "std_msgs/msg/string.hpp"
 #include "robot_interfaces/msg/mob_ed_command.hpp"
 
 // Core
@@ -16,9 +19,11 @@
 #include "robot_control/estimation/state_estimator.hpp"
 #include "robot_control/estimation/terrain_estimator.hpp"
 #include "robot_control/estimation/contact_detector.hpp"
+#include "robot_control/estimation/climb_geometry_estimator.hpp"
 
 // Tasks
 #include "robot_control/tasks/task_controller.hpp"
+#include "robot_control/tasks/high_stair_controller.hpp"
 
 using namespace std::chrono_literals;
 
@@ -44,7 +49,10 @@ public:
         state_estimator_     = std::make_unique<estimation::StateEstimator>(robot_params_);
         terrain_estimator_   = std::make_unique<estimation::TerrainEstimator>(robot_params_);
         contact_detector_    = std::make_unique<estimation::ContactDetector>(robot_params_);
+        climb_geometry_estimator_ = std::make_unique<estimation::ClimbGeometryEstimator>(robot_params_);
         task_controller_     = std::make_unique<tasks::TaskController>();
+        task_controller_->setModeProfile(climb_mode_);
+        high_stair_controller_ = std::make_unique<tasks::HighStairController>();
 
         // ============================================================
         // Initialize state variables
@@ -83,6 +91,104 @@ public:
         sub_e_stop_ = this->create_subscription<std_msgs::msg::Bool>(
             "/e_stop", 10,
             std::bind(&MobedControlNode::eStopCallback, this, std::placeholders::_1));
+
+        // Dynamic Payload Mass & Posture Configuration (IEEE RA-L 2026 Eq 11, 16, 17)
+        this->declare_parameter<double>("payload_mass", 0.0);
+        this->declare_parameter<int>("posture_configuration", 0);
+
+        double init_payload = this->get_parameter("payload_mass").as_double();
+        int init_config = this->get_parameter("posture_configuration").as_int();
+
+        if (init_payload > 0.0) {
+            balance_controller_->setPayloadMass(init_payload);
+        }
+        if (init_config >= 0 && init_config <= 2) {
+            balance_controller_->setPostureConfiguration(static_cast<PostureConfiguration>(init_config));
+        }
+
+        // Adaptive Obstacle Curb Height Parameter & Subscription (0.04m ~ 0.15m)
+        this->declare_parameter<double>("target_curb_height", 0.075);
+        double init_curb = this->get_parameter("target_curb_height").as_double();
+        task_controller_->setCurbHeight(init_curb);
+
+        sub_curb_height_ = this->create_subscription<std_msgs::msg::Float64>(
+            "/mobed/curb_height", 10,
+            [this](const std_msgs::msg::Float64::SharedPtr msg) {
+                double h = std::clamp(msg->data, 0.04, 0.15);
+                RCLCPP_INFO(this->get_logger(), "Adaptive curb height updated: %.3f m", h);
+                task_controller_->setCurbHeight(h);
+            });
+
+        sub_payload_mass_ = this->create_subscription<std_msgs::msg::Float64>(
+            "/mobed/payload_mass", 10,
+            [this](const std_msgs::msg::Float64::SharedPtr msg) {
+                double mass = std::max(0.0, msg->data);
+                RCLCPP_INFO(this->get_logger(), "Dynamic payload mass updated: %.2f kg", mass);
+                balance_controller_->setPayloadMass(mass);
+            });
+
+        sub_posture_mode_int_ = this->create_subscription<std_msgs::msg::Int32>(
+            "/mobed/posture_mode", 10,
+            [this](const std_msgs::msg::Int32::SharedPtr msg) {
+                if (msg->data >= 0 && msg->data <= 2) {
+                    auto cfg = static_cast<PostureConfiguration>(msg->data);
+                    const char* name = (cfg == PostureConfiguration::OUTWARD) ? "OUTWARD" :
+                                       (cfg == PostureConfiguration::INWARD)  ? "INWARD" : "SPIN";
+                    RCLCPP_INFO(this->get_logger(), "Posture configuration changed to: %s (%d)", name, msg->data);
+                    balance_controller_->setPostureConfiguration(cfg);
+                } else {
+                    RCLCPP_WARN(this->get_logger(), "Invalid posture configuration integer: %d (0:OUTWARD, 1:INWARD, 2:SPIN)", msg->data);
+                }
+            });
+
+        sub_posture_mode_str_ = this->create_subscription<std_msgs::msg::String>(
+            "/mobed/posture_mode_str", 10,
+            [this](const std_msgs::msg::String::SharedPtr msg) {
+                if (msg->data == "OUTWARD" || msg->data == "outward") {
+                    RCLCPP_INFO(this->get_logger(), "Posture configuration changed to: OUTWARD");
+                    balance_controller_->setPostureConfiguration(PostureConfiguration::OUTWARD);
+                } else if (msg->data == "INWARD" || msg->data == "inward") {
+                    RCLCPP_INFO(this->get_logger(), "Posture configuration changed to: INWARD");
+                    balance_controller_->setPostureConfiguration(PostureConfiguration::INWARD);
+                } else if (msg->data == "SPIN" || msg->data == "spin") {
+                    RCLCPP_INFO(this->get_logger(), "Posture configuration changed to: SPIN");
+                    balance_controller_->setPostureConfiguration(PostureConfiguration::SPIN);
+                } else {
+                    RCLCPP_WARN(this->get_logger(), "Invalid posture configuration string: '%s'", msg->data.c_str());
+                }
+            });
+
+        // Climb Mode Guard: 1 = LOW_80MM, 2 = HIGH_200MM
+        sub_climb_mode_ = this->create_subscription<std_msgs::msg::Int32>(
+            "/mobed/climb_mode", 10,
+            [this](const std_msgs::msg::Int32::SharedPtr msg) {
+                if (msg->data == 1 || msg->data == 2) {
+                    auto new_mode = static_cast<ClimbMode>(msg->data);
+                    if (new_mode != climb_mode_) {
+                        const char* mode_name = (new_mode == ClimbMode::LOW_80MM) ? "LOW_80MM" : "HIGH_200MM";
+                        RCLCPP_INFO(this->get_logger(), "Climb mode changed to: %s (%d)", mode_name, msg->data);
+                        climb_mode_ = new_mode;
+                        contact_detector_->reset();
+                        task_controller_->reset();
+                        task_controller_->setModeProfile(climb_mode_);
+                        state_estimator_->reset();
+                        terrain_estimator_->reset();
+                        for (int i = 0; i < 4; ++i) {
+                            prev_cad_ecc_[i] = curr_ecc_angles_(i) * ecc_signs_[i] + ecc_offsets_[i];
+                        }
+                        if (climb_mode_ == ClimbMode::HIGH_200MM) {
+                            target_height_ = 0.22;
+                            transition_smoother_.start(curr_ecc_angles_, curr_wheel_velocities_, 1.0, 1.0, 0.25);
+                        } else {
+                            balance_controller_->syncCurrentAngles(curr_ecc_angles_);
+                            target_height_ = 0.205;
+                            transition_smoother_.start(curr_ecc_angles_, curr_wheel_velocities_, 1.0, 1.0, 0.25);
+                        }
+                    }
+                } else {
+                    RCLCPP_WARN(this->get_logger(), "Invalid climb mode: %d (1:LOW_80MM, 2:HIGH_200MM)", msg->data);
+                }
+            });
 
         // ============================================================
         // ROS 2 Publishers
@@ -230,18 +336,14 @@ private:
             }
         }
 
-        // On first arrival of real joint data, initialise the Unwrap tracking array
-        // from the actual received CAD angles, NOT from ecc_offsets_ (which maps to
-        // math angle = 0 and may differ from the MuJoCo home keyframe position).
-        if (!joints_initialized_) {
-            for (int i = 0; i < 4; ++i) {
-                // Back-convert the just-parsed math angle to CAD frame.
-                // curr_ecc_angles_(i) already holds (pos - offset) * sign, so:
-                //   cad = math * sign + offset
-                prev_cad_ecc_[i] = curr_ecc_angles_(i) * ecc_signs_[i] + ecc_offsets_[i];
+        // Resync CAD tracking array on initial startup or when simulation teleports/resets keyframe (> 0.6 rad delta)
+        for (int i = 0; i < 4; ++i) {
+            double current_cad = curr_ecc_angles_(i) * ecc_signs_[i] + ecc_offsets_[i];
+            if (!joints_initialized_ || std::abs(current_cad - prev_cad_ecc_[i]) > 0.6) {
+                prev_cad_ecc_[i] = current_cad;
             }
-            joints_initialized_ = true;
         }
+        joints_initialized_ = true;
     }
 
     // ================================================================
@@ -252,6 +354,9 @@ private:
         if (e_stop_active_) {
             RCLCPP_WARN(this->get_logger(), "EMERGENCY STOP ACTIVATED!");
             task_controller_->abort();
+            high_stair_controller_->abort();
+            task_controller_->reset();
+            contact_detector_->reset();
         }
     }
 
@@ -266,6 +371,8 @@ private:
         if (dt <= 0.0 || dt > 0.5) return;
         if (!joints_initialized_) return;  // Wait for first real joint state before running any control
 
+        transition_smoother_.update(dt);
+
         // ============================================================
         // Phase 1: Homing Initialization
         // ============================================================
@@ -278,46 +385,15 @@ private:
         }
 
         // ============================================================
-        // Phase 2: State Estimation (EKF predict + odometry correct Eq 3)
+        // Phase 2: State Estimation (EKF predict + odometry correct Eq 3 with contact gating)
         // ============================================================
-        if (imu_received_) {
-            state_estimator_->predict(latest_imu_, dt);
-        }
-        Eigen::Vector3d omega_body = imu_received_ ? latest_imu_.angular_velocity : Eigen::Vector3d::Zero();
-        state_estimator_->correctWithOdometry(
-            curr_wheel_velocities_, curr_steer_angles_, curr_ecc_angles_,
-            curr_steer_velocities_, curr_ecc_velocities_, omega_body);
-
-        BodyState body_state = state_estimator_->getState();
-
-        // ============================================================
-        // Phase 2.5: Terrain Estimation (Eq 4-6 in paper)
-        // ============================================================
-        std::array<Eigen::Vector3d, NUM_LEGS> foot_pos_in_base;
-        std::array<Eigen::Vector3d, NUM_LEGS> contact_points_world;
+        // Query FSM task controller for airborne legs during climbing
         std::array<bool, NUM_LEGS> contact_valid = task_controller_->getContactValid();
-
-        Eigen::Vector3d base_pos = body_state.position;
-        Eigen::Matrix3d R_base = body_state.orientation.toRotationMatrix();
-
-        for (int i = 0; i < NUM_LEGS; ++i) {
-            foot_pos_in_base[i] = kinematics_->computeFootPositionInBase(
-                i, curr_steer_angles_(i), curr_ecc_angles_(i));
-            // p_C = p + R * ^B r_i (Eq 2) for srbd_model
-            contact_points_world[i] = base_pos + R_base * foot_pos_in_base[i];
-        }
-
-        Eigen::Vector3d active_cmd_vel = is_homing_ ? Eigen::Vector3d::Zero() : cmd_vel_;
-        if (task_controller_->isActive()) {
-            double fsm_vx = task_controller_->getForwardVelocityOverride();
-            active_cmd_vel = Eigen::Vector3d(fsm_vx, 0.0, 0.0);
-        }
 
         // Real-Time Contact Force Verification (Phase 2.7):
         // If a leg has near-zero torque (|tau| < 1.0 Nm, nominal is 3.5~5 Nm) while the chassis
         // is in motion, the wheel has lost ground support (suspended in air or stepping off a bump).
         // Mask it out from contact_valid so it does not pull the terrain plane into a tilted deadlock!
-        // We only do this if at least 3 legs maintain ground contact to preserve plane fit solvability.
         int supported_legs = 0;
         for (int i = 0; i < NUM_LEGS; ++i) {
             if (contact_valid[i] && std::abs(curr_ecc_efforts_(i)) >= 1.0) {
@@ -332,8 +408,47 @@ private:
             }
         }
 
+        if (imu_received_) {
+            state_estimator_->predict(latest_imu_, dt);
+        }
+        Eigen::Vector3d omega_body = imu_received_ ? latest_imu_.angular_velocity : Eigen::Vector3d::Zero();
+        state_estimator_->correctWithOdometry(
+            curr_wheel_velocities_, curr_steer_angles_, curr_ecc_angles_,
+            curr_steer_velocities_, curr_ecc_velocities_, omega_body, contact_valid);
+
+        BodyState body_state = state_estimator_->getState();
+
+        // ============================================================
+        // Phase 2.5: Terrain Estimation (Eq 4-6 in paper)
+        // ============================================================
+        std::array<Eigen::Vector3d, NUM_LEGS> foot_pos_in_base;
+        std::array<Eigen::Vector3d, NUM_LEGS> contact_points_world;
+
+        Eigen::Vector3d base_pos = body_state.position;
+        Eigen::Matrix3d R_base = body_state.orientation.toRotationMatrix();
+
+        for (int i = 0; i < NUM_LEGS; ++i) {
+            foot_pos_in_base[i] = kinematics_->computeFootPositionInBase(
+                i, curr_steer_angles_(i), curr_ecc_angles_(i));
+            // p_C = p + R * ^B r_i (Eq 2) for srbd_model
+            contact_points_world[i] = base_pos + R_base * foot_pos_in_base[i];
+        }
+
+        // Update climb geometry estimator (step height, pitch, support margins)
+        climb_geometry_estimator_->update(
+            body_state, contact_points_world,
+            curr_wheel_velocities_, curr_wheel_efforts_,
+            prev_target_wheel_, dt);
+
+        Eigen::Vector3d active_cmd_vel = is_homing_ ? Eigen::Vector3d::Zero() : cmd_vel_;
+        if (task_controller_->isActive()) {
+            double fsm_vx = task_controller_->getForwardVelocityOverride();
+            active_cmd_vel = Eigen::Vector3d(fsm_vx, 0.0, 0.0);
+        }
+
         // Run plane fitting via pseudo-inverse least squares in robot heading frame
-        if (!task_controller_->isActive()) {
+        bool climbing_active = task_controller_->isActive();
+        if (!climbing_active) {
             bool is_stopped = (active_cmd_vel.norm() < 1e-3);
             terrain_estimator_->update(foot_pos_in_base, R_base, contact_valid, is_stopped);
         }
@@ -342,9 +457,12 @@ private:
         // ============================================================
         // Phase 3: Contact Detection (Multi-Modal: Torque + Wheel Stall + Chassis Blocked)
         // ============================================================
+        Eigen::Vector3d v_body = R_base.transpose() * body_state.linear_velocity;
+        double chassis_forward_vel = v_body.x();
+
         contact_detector_->update(
             curr_ecc_efforts_, curr_wheel_efforts_, curr_wheel_velocities_,
-            body_state.linear_velocity.x(), active_cmd_vel.x(), dt);
+            chassis_forward_vel, active_cmd_vel.x(), dt);
 
         // ============================================================
         // Phase 4: FSM Task Controller (climbing state machine)
@@ -357,27 +475,15 @@ private:
                                            (std::abs(curr_steer_angles_(0)) < 0.52) &&
                                            (std::abs(curr_steer_angles_(1)) < 0.52);
 
-            // ============================================================
-            // Ramp vs. Curb Physical Disambiguation (Aligned with IEEE RA-L 2026):
-            // On a smooth ramp (Track 1A), wheels roll continuously (omega > 1.0 rad/s).
-            // On a curb (Lane 2A/2B), wheels physically stall against the vertical face (omega < 0.5 rad/s, tau > 7 Nm).
-            // A vehicle with any drive wheel stalled CANNOT be rolling up a smooth ramp!
-            // ============================================================
             bool fl_stalled = (std::abs(curr_wheel_efforts_(0)) > robot_params_.wheel_stall_torque_threshold) &&
                               (std::abs(curr_wheel_velocities_(0)) < robot_params_.wheel_stall_vel_threshold);
             bool fr_stalled = (std::abs(curr_wheel_efforts_(1)) > robot_params_.wheel_stall_torque_threshold) &&
                               (std::abs(curr_wheel_velocities_(1)) < robot_params_.wheel_stall_vel_threshold);
             bool front_wheel_stalled = fl_stalled || fr_stalled;
 
-            // 1. Steady-state Ramp Gate:
-            // A true continuous ramp is strictly longitudinal (pitch > 4.5 deg) with near-zero lateral roll (< 3.2 deg).
-            // Unilateral curbs produce heavy roll (> 5 deg) and must NOT be classified as ramps!
             bool steady_ramp = (terrain_state.pitch_slope > robot_params_.ramp_inhibit_slope_threshold) &&
                                (std::abs(terrain_state.roll_slope) < 0.055);
 
-            // 2. Transient Ramp Dynamics:
-            // Wheels must be actively rolling forward up a slope (> 1.0 rad/s),
-            // NOT halted or jammed against an obstacle face.
             bool wheels_rolling_forward = (curr_wheel_velocities_(0) > 1.0) &&
                                           (curr_wheel_velocities_(1) > 1.0);
             double pitch_curr = body_state.pitch();
@@ -386,22 +492,19 @@ private:
                                   ((pitch_curr > robot_params_.ramp_inhibit_pitch_threshold) ||
                                    (pitch_rate > robot_params_.ramp_inhibit_pitch_rate_threshold));
 
-            // Physical Disambiguation: A stalled wheel strictly overrides ramp detection!
             bool is_on_ramp = !front_wheel_stalled && (steady_ramp || transient_ramp);
 
-            bool obstacle_climb_permitted = forward_straight_active && !is_on_ramp;
+            bool obstacle_climb_permitted = forward_straight_active;
+            // Only inhibit on mild cruising ramps when target curb height is very low (< 50mm) and in LOW mode
+            if (climb_mode_ == ClimbMode::LOW_80MM && task_controller_->getCurbHeight() < 0.05 && is_on_ramp) {
+                obstacle_climb_permitted = false;
+            }
 
             if (!task_controller_->isActive() && !obstacle_climb_permitted) {
                 contact_detector_->reset();
-            } else if (task_controller_->isActive() && is_on_ramp &&
-                       (task_controller_->getState() == tasks::ClimbState::FRONT_CONTACT ||
-                        task_controller_->getState() == tasks::ClimbState::FRONT_LIFT ||
-                        task_controller_->getState() == tasks::ClimbState::FRONT_PLACED)) {
-                // If FSM was triggered near ramp foot, but robot is truly rolling on a continuous ramp,
-                // abort immediately and hand control back to BalanceController.
-                task_controller_->abort();
             }
-            task_controller_->update(*contact_detector_, curr_ecc_angles_, curr_ecc_efforts_, dt);
+            task_controller_->update(
+                *contact_detector_, curr_ecc_angles_, curr_ecc_efforts_, dt, chassis_forward_vel);
         }
 
         // Log FSM state transitions with override mask info
@@ -409,46 +512,67 @@ private:
         std::string curr_state_name = task_controller_->getStateName();
         if (curr_state_name != prev_state_name) {
             auto mask = task_controller_->getOverrideMask();
-            RCLCPP_INFO(this->get_logger(), "FSM Transition: %s → %s | Overrides: [FL:%d FR:%d RL:%d RR:%d]",
+            RCLCPP_INFO(this->get_logger(), "[Mode %d] FSM Transition: %s -> %s | Overrides: [FL:%d FR:%d RL:%d RR:%d]",
+                        static_cast<int>(climb_mode_),
                         prev_state_name.c_str(), curr_state_name.c_str(),
                         mask[FL], mask[FR], mask[RL], mask[RR]);
             prev_state_name = curr_state_name;
         }
 
         // ============================================================
-        // Phase 5: Driving Controller (with Bank Angle)
+        // Phase 5: Driving Controller (with Bank Angle & Torque Loops)
         // ============================================================
         auto [target_steer, target_wheel] = driving_controller_->update(
             active_cmd_vel, curr_steer_angles_, curr_ecc_angles_, dt,
-            e_stop_active_, is_homing_);
+            e_stop_active_, is_homing_, curr_steer_velocities_, curr_wheel_velocities_);
+
+        prev_target_wheel_ = target_wheel;
 
         // ============================================================
         // Phase 6: Balance Controller (with Bank Angle overlay)
         // ============================================================
-        double active_height = is_homing_ ? 0.18 : target_height_;
-        double active_roll   = is_homing_ ? 0.0 : target_roll_;
-        double active_pitch  = is_homing_ ? 0.0 : target_pitch_;
+        Eigen::Vector4d target_ecc = Eigen::Vector4d::Zero();
+        ControlOutput balance_out;
 
-        // Overlay bank angle from driving controller onto target roll
-        active_roll += driving_controller_->getBankAngle();
+        if (climb_mode_ == ClimbMode::HIGH_200MM) {
+            // Mode 2: High Stair 200mm assault state.
+            // Cruising stance: hold slight 7°~8° outward inclination (0.12 rad),
+            // giving ~219mm belly clearance while preserving a ~1.1cm impact lever arm
+            // to eliminate horizontal impact singularity and enable zero-delay collision detection.
+            // Once climbed onto 200mm plateau, hold the balanced post-climb stance (FL/FR: +2.80, RL/RR: -2.80).
+            if (task_controller_->hasClimbed()) {
+                target_ecc << 2.80, 2.80, -2.80, -2.80;
+            } else {
+                target_ecc << 0.12, 0.12, -0.12, -0.12;
+            }
+            balance_out.ecc_torques.setZero();
+            balance_out.ecc_angles = target_ecc;
+        } else {
+            // Mode 1: Nominal balanced cruising & 80mm obstacle crossing (37 deg outward stance)
+            double active_height = is_homing_ ? 0.205 : target_height_;
+            double active_roll   = is_homing_ ? 0.0 : target_roll_;
+            double active_pitch  = is_homing_ ? 0.0 : target_pitch_;
 
-        // Prepare terrain state for BalanceController:
-        // When climbing an obstacle, zero out longitudinal pitch slope compensation so that
-        // BalanceController does not command grounded front legs into a deep crouch/lift.
-        TerrainState active_terrain_state = terrain_state;
-        if (task_controller_->isActive()) {
-            active_terrain_state.pitch_slope = 0.0;
-            active_terrain_state.rotation = Eigen::AngleAxisd(
-                active_terrain_state.roll_slope, Eigen::Vector3d::UnitX()).toRotationMatrix();
+            // Overlay bank angle from driving controller onto target roll
+            active_roll += driving_controller_->getBankAngle();
+
+            // Prepare terrain state for BalanceController:
+            // When climbing an obstacle, zero out longitudinal pitch slope compensation
+            TerrainState active_terrain_state = terrain_state;
+            if (task_controller_->isActive()) {
+                active_terrain_state.pitch_slope = 0.0;
+                active_terrain_state.rotation = Eigen::AngleAxisd(
+                    active_terrain_state.roll_slope, Eigen::Vector3d::UnitX()).toRotationMatrix();
+            }
+
+            // Call updateHybrid using contact points from Phase 2.5 and body_state from Phase 2
+            balance_out = balance_controller_->updateHybrid(
+                active_height, active_roll, active_pitch,
+                target_steer, curr_ecc_angles_, curr_ecc_efforts_, body_state,
+                contact_points_world, contact_valid, active_terrain_state, dt, e_stop_active_, active_cmd_vel);
+
+            target_ecc = balance_out.ecc_angles;
         }
-
-        // Call updateHybrid using contact points from Phase 2.5 and body_state from Phase 2
-        ControlOutput balance_out = balance_controller_->updateHybrid(
-            active_height, active_roll, active_pitch,
-            target_steer, curr_ecc_angles_, curr_ecc_efforts_, body_state,
-            contact_points_world, contact_valid, active_terrain_state, dt, e_stop_active_);
-
-        Eigen::Vector4d target_ecc = balance_out.ecc_angles;
 
         // ============================================================
         // Phase 7: FSM Override — replace specific legs if climbing
@@ -456,14 +580,27 @@ private:
         // Always snapshot the FSM override angles; needed for blend-out lerp in Phase 8
         // even when isActive() is false (during the IDLE blend-out period).
         Eigen::Vector4d ecc_overrides_vec = task_controller_->getEccOverrides();
-
+        std::array<bool, NUM_LEGS> ecc_override_mask = task_controller_->getOverrideMask();
+        double blend_w = task_controller_->getBlendWeight();
         if (task_controller_->isActive()) {
-            auto override_mask = task_controller_->getOverrideMask();
-
             for (int i = 0; i < NUM_LEGS; ++i) {
-                if (override_mask[i]) {
+                if (ecc_override_mask[i]) {
                     target_ecc(i) = ecc_overrides_vec(i);
                 }
+            }
+        } else if (blend_w > 0.0 && climb_mode_ != ClimbMode::HIGH_200MM) {
+            for (int i = 0; i < NUM_LEGS; ++i) {
+                if (ecc_override_mask[i]) {
+                    target_ecc(i) = blend_w * ecc_overrides_vec(i) + (1.0 - blend_w) * target_ecc(i);
+                }
+            }
+        }
+
+        // Apply TransitionSmoother (Zero-jerk mode switch S-curve)
+        if (transition_smoother_.in_transition) {
+            double alpha = transition_smoother_.getWeight();
+            for (int i = 0; i < NUM_LEGS; ++i) {
+                target_ecc(i) = (1.0 - alpha) * transition_smoother_.start_ecc_angles(i) + alpha * target_ecc(i);
             }
         }
 
@@ -488,7 +625,8 @@ private:
             cmd_msg.name.push_back(steer_names[i]);
             cmd_msg.position.push_back(target_steer(i) * steer_signs_[i]);
             cmd_msg.velocity.push_back(0.0);
-            cmd_msg.effort.push_back(0.0);
+            double steer_effort = driving_controller_->getSteerTorques()(i) * steer_signs_[i];
+            cmd_msg.effort.push_back(steer_effort);
 
             // Eccentric: math → CAD (with continuous Unwrap + blend-out lerp)
             cmd_msg.name.push_back(ecc_names[i]);
@@ -496,11 +634,10 @@ private:
             // 1. Convert math-frame target to raw CAD frame
             double raw_cad = target_ecc(i) * ecc_signs_[i] + ecc_offsets_[i];
 
-            // 2. Blend-out lerp: when FSM just finished (IDLE + blend_out_weight_ > 0),
+            // 2. Blend-out lerp: when FSM just finished (IDLE + blend_w > 0),
             //    interpolate between the last FSM override angle and the IK angle.
             //    This prevents the chassis from slamming down immediately after climbing.
-            double blend_w = task_controller_->getBlendWeight();
-            if (blend_w > 0.0 && task_controller_->getOverrideMask()[i]) {
+            if (blend_w > 0.0 && ecc_override_mask[i]) {
                 double fsm_cad = ecc_overrides_vec(i) * ecc_signs_[i] + ecc_offsets_[i];
                 raw_cad = blend_w * fsm_cad + (1.0 - blend_w) * raw_cad;
             }
@@ -517,16 +654,31 @@ private:
             cmd_msg.velocity.push_back(0.0);
 
             // Zero out feedforward GRF torque for FSM-overridden legs to prevent conflict with position trajectory
-            double effort_cmd = (task_controller_->isActive() && task_controller_->getOverrideMask()[i])
+            bool leg_is_overridden = task_controller_->isActive() && ecc_override_mask[i];
+            double ff_weight = transition_smoother_.getFeedforwardWeight();
+            double effort_cmd = leg_is_overridden
                               ? 0.0
-                              : balance_out.ecc_torques(i) * ecc_signs_[i];
+                              : balance_out.ecc_torques(i) * ecc_signs_[i] * ff_weight;
             cmd_msg.effort.push_back(effort_cmd);
 
             // Wheels: math → CAD
             cmd_msg.name.push_back(wheel_names[i]);
             cmd_msg.position.push_back(0.0);
-            cmd_msg.velocity.push_back(target_wheel(i) * wheel_signs_[i]);
-            cmd_msg.effort.push_back(0.0);
+
+            double target_wheel_vel = target_wheel(i);
+            if (task_controller_->isActive()) {
+                auto wheel_override_mask = task_controller_->getWheelOverrideMask();
+                if (wheel_override_mask[i]) {
+                    target_wheel_vel = task_controller_->getWheelSpeedOverrides()(i);
+                }
+            }
+            if (transition_smoother_.in_transition) {
+                double alpha = transition_smoother_.getWeight();
+                target_wheel_vel = (1.0 - alpha) * transition_smoother_.start_wheel_vels(i) + alpha * target_wheel_vel;
+            }
+            cmd_msg.velocity.push_back(target_wheel_vel * wheel_signs_[i]);
+            double wheel_effort = driving_controller_->getWheelTorques()(i) * wheel_signs_[i];
+            cmd_msg.effort.push_back(wheel_effort);
         }
 
         pub_joint_cmds_->publish(cmd_msg);
@@ -542,8 +694,54 @@ private:
     std::unique_ptr<estimation::TerrainEstimator>     terrain_estimator_;
     std::unique_ptr<estimation::ContactDetector>      contact_detector_;
     std::unique_ptr<tasks::TaskController>            task_controller_;
+    std::unique_ptr<tasks::HighStairController>       high_stair_controller_;
+    std::unique_ptr<estimation::ClimbGeometryEstimator> climb_geometry_estimator_;
 
     RobotParams robot_params_;
+    ClimbMode climb_mode_ = ClimbMode::LOW_80MM;
+
+    // Zero-Jerk Mode Transition Smoother (0.2s Cosine S-curve)
+    struct TransitionSmoother {
+        bool in_transition = false;
+        double timer = 0.0;
+        double duration = 0.20;
+        Eigen::Vector4d start_ecc_angles = Eigen::Vector4d::Zero();
+        Eigen::Vector4d start_wheel_vels = Eigen::Vector4d::Zero();
+        double start_ff_torque_weight = 1.0;
+        double target_ff_torque_weight = 1.0;
+
+        void start(const Eigen::Vector4d& curr_ecc, const Eigen::Vector4d& curr_wheel_vels,
+                   double start_ff_weight, double target_ff_weight, double trans_duration = 0.20) {
+            in_transition = true;
+            timer = 0.0;
+            duration = trans_duration;
+            start_ecc_angles = curr_ecc;
+            start_wheel_vels = curr_wheel_vels;
+            start_ff_torque_weight = start_ff_weight;
+            target_ff_torque_weight = target_ff_weight;
+        }
+
+        void update(double dt) {
+            if (!in_transition) return;
+            timer += dt;
+            if (timer >= duration) {
+                in_transition = false;
+                timer = duration;
+            }
+        }
+
+        double getWeight() const {
+            if (!in_transition) return 1.0;
+            double s = std::clamp(timer / duration, 0.0, 1.0);
+            return 0.5 * (1.0 - std::cos(M_PI * s));
+        }
+
+        double getFeedforwardWeight() const {
+            if (!in_transition) return target_ff_torque_weight;
+            double w = getWeight();
+            return (1.0 - w) * start_ff_torque_weight + w * target_ff_torque_weight;
+        }
+    } transition_smoother_;
 
     // ================================================================
     // ROS 2 Communication
@@ -552,6 +750,11 @@ private:
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr sub_joint_states_;
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_imu_;
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr sub_e_stop_;
+    rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr sub_payload_mass_;
+    rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr sub_curb_height_;
+    rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr sub_posture_mode_int_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_posture_mode_str_;
+    rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr sub_climb_mode_;
     rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr pub_joint_cmds_;
 
     rclcpp::TimerBase::SharedPtr timer_;
@@ -561,7 +764,7 @@ private:
     // State Variables
     // ================================================================
     Eigen::Vector3d cmd_vel_;
-    double target_height_ = 0.18;
+    double target_height_ = 0.205;
     double target_roll_   = 0.0;
     double target_pitch_  = 0.0;
 
@@ -572,6 +775,7 @@ private:
     Eigen::Vector4d curr_ecc_efforts_;
     Eigen::Vector4d curr_wheel_efforts_;
     Eigen::Vector4d curr_wheel_velocities_;
+    Eigen::Vector4d prev_target_wheel_ = Eigen::Vector4d::Zero();
 
     ImuData latest_imu_;
     bool imu_received_ = false;

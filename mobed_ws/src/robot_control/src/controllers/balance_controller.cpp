@@ -16,6 +16,13 @@ BalanceController::BalanceController(const BalanceControllerParams& params,
     prev_compliance_shift_.setZero();
 }
 
+void BalanceController::setPayloadMass(double mass) {
+    robot_params_.payload_mass = mass;
+    robot_params_.total_mass = robot_params_.body_mass + mass;
+    srbd_model_.setPayload(mass, robot_params_.payload_com_z_offset);
+    grf_optimizer_.setRobotParams(robot_params_);
+}
+
 // ============================================================================
 // Original position-only interface (backward compatible)
 // ============================================================================
@@ -49,9 +56,9 @@ Eigen::Vector4d BalanceController::update(
     double safe_roll = std::clamp(target_roll, -params_.max_roll, params_.max_roll);
     double safe_pitch = std::clamp(target_pitch, -params_.max_pitch, params_.max_pitch);
 
-    // 2. Math Kinematics (Exact non-linear projection)
+    // 2. Math Kinematics (Exact non-linear projection with posture configuration)
     Eigen::Vector4d raw_ecc_angles = kinematics_->computePostureIK(
-        target_height, safe_roll, safe_pitch, current_steer_angles, R_T);
+        target_height, safe_roll, safe_pitch, current_steer_angles, R_T, current_config_);
 
     Eigen::Vector4d final_ecc = prev_ecc_angles_;
 
@@ -105,29 +112,23 @@ void BalanceController::computeGainSchedule(
     // w_ik = (1 + Kh * max(0, h_cmd - h_mid) / (h_max - h_mid)) * (1 + m_payload / m_body)    (17)
     // ================================================================
 
-    // Eq 16-17 requires RobotParams
-    RobotParams rp;
-    double h_max = rp.max_height;
-    double h_mid = 0.5 * (rp.min_height + rp.max_height);
-    double h_cmd = std::clamp(current_height, rp.min_height, h_max);
+    double h_max = robot_params_.max_height;
+    double h_mid = 0.5 * (robot_params_.min_height + robot_params_.max_height);
+    double h_cmd = std::clamp(current_height, robot_params_.min_height, h_max);
 
     // To prevent division by zero, ensure h_max - h_mid > 0
     double den = std::max(1e-6, h_max - h_mid);
 
-    // Eq 16: Augmented with baseline compliance floor (0.35) so shock
-    // absorption is active even at max height (0.22m)
-    double base_grf = 0.35;
-    w_grf = base_grf + (1.0 - base_grf) * std::sqrt(std::abs(h_max - h_cmd) / den);
-    w_grf = std::clamp(w_grf, 0.0, 1.0);
+    // Eq 16: Exact paper linear formula. Range is [0, 2.0]
+    // At h_cmd = h_max (0.22m): w_grf = 0.0 (converges smoothly to 0 near singularity)
+    // At h_cmd = h_mid (0.15m): w_grf = 1.0
+    // At h_cmd = h_min (0.08m): w_grf = 2.0
+    w_grf = std::abs(h_max - h_cmd) / den;
 
-    // Eq 17
+    // Eq 17: Kh = 7.0 from paper, scaled by dynamic payload mass ratio
     double Kh = 7.0; // from paper
-    double mass_ratio = 1.0 + (rp.payload_mass / rp.body_mass);
+    double mass_ratio = 1.0 + (robot_params_.payload_mass / robot_params_.body_mass);
     w_ik = (1.0 + Kh * std::max(0.0, h_cmd - h_mid) / den) * mass_ratio;
-
-    // The paper does not explicitly normalize, but they act as weights.
-    // In Eq 9: tau = w_grf * tau_grf + w_ik * tau_ik.
-    // So we apply them as scales directly. No normalization here.
 }
 
 // ============================================================================
@@ -138,20 +139,18 @@ void BalanceController::computeDesiredAcceleration(
     const Eigen::Vector4d& current_ecc_angles,
     const BodyState& body_state,
     Eigen::Vector3d& desired_linear_accel,
-    Eigen::Vector3d& desired_angular_accel) const
+    Eigen::Vector3d& desired_angular_accel,
+    const Eigen::Vector3d& cmd_vel,
+    double dt) const
 {
     // ================================================================
-    // Simple PD control to generate reference accelerations
-    // for the SRBD model.
+    // Reference acceleration generation for SRBD model (Paper Eq 11-12)
     //
     // Linear (Z-axis only for height control):
     //   a_z = kp * (h_target - h_current) + kd * (0 - v_z)
     //
     // Physical ground clearance is computed directly from forward kinematics
     // of the 4 legs: H_i = posture_z_offset + l_ecc * cos(q_ecc,i) + r_wheel.
-    // This provides exact, drift-free height feedback and completely prevents
-    // open-loop EKF acceleration integration drift from driving height error
-    // to infinity and pegging compliance shifts.
     // ================================================================
 
     double h_current = 0.0;
@@ -166,14 +165,67 @@ void BalanceController::computeDesiredAcceleration(
     desired_linear_accel = Eigen::Vector3d::Zero();
     desired_linear_accel.z() = params_.kp_height * h_error - params_.kd_height * vz;
 
-    double roll_current  = body_state.roll();
-    double pitch_current = body_state.pitch();
-    double omega_x = body_state.angular_velocity.x();
-    double omega_y = body_state.angular_velocity.y();
+    // Active longitudinal and centripetal acceleration feedforward (Paper Eq 11):
+    // Preemptively cancels pitch load transfer from d(vx)/dt and roll load transfer from wz * vx
+    double ax_cmd = 0.0;
+    if (dt > 1e-4) {
+        ax_cmd = (cmd_vel.x() - prev_cmd_vel_.x()) / dt;
+        ax_cmd = std::clamp(ax_cmd, -3.0, 3.0);
+    }
+    prev_cmd_vel_ = cmd_vel;
 
-    desired_angular_accel = Eigen::Vector3d::Zero();
-    desired_angular_accel.x() = params_.kp_roll  * (target_roll  - roll_current)  - params_.kd_roll  * omega_x;
-    desired_angular_accel.y() = params_.kp_pitch * (target_pitch - pitch_current) - params_.kd_pitch * omega_y;
+    double ay_cmd = cmd_vel.z() * cmd_vel.x();
+    ay_cmd = std::clamp(ay_cmd, -3.0, 3.0);
+
+    // Transform planar acceleration from vehicle heading frame to world frame
+    double yaw_curr = body_state.yaw();
+    Eigen::Matrix3d R_yaw = Eigen::AngleAxisd(yaw_curr, Eigen::Vector3d::UnitZ()).toRotationMatrix();
+    Eigen::Vector3d a_planar_heading(ax_cmd, ay_cmd, 0.0);
+    desired_linear_accel.head<2>() = (R_yaw * a_planar_heading).head<2>();
+
+    // ================================================================
+    // SO(3) Lie Algebra Logarithmic Map (Paper Eq 12):
+    //   alpha^d = K_{P,T} * log(R^d * R^T) + K_{D,T} * (omega^d - omega)
+    //
+    // Eliminates gimbal lock and non-commutative Euler angle coupling
+    // across the full 19 deg roll x 23 deg pitch workspace.
+    // ================================================================
+    // Desired orientation R^d (ZYX Tait-Bryan: keeps current yaw heading, commands target roll & pitch)
+    Eigen::Matrix3d R_curr = body_state.orientation.toRotationMatrix();
+    Eigen::Matrix3d R_d = (Eigen::AngleAxisd(yaw_curr, Eigen::Vector3d::UnitZ())
+                         * Eigen::AngleAxisd(target_pitch, Eigen::Vector3d::UnitY())
+                         * Eigen::AngleAxisd(target_roll, Eigen::Vector3d::UnitX())).toRotationMatrix();
+
+    // Relative rotation error in world frame: R_err = R^d * R^T
+    Eigen::Matrix3d R_err = R_d * R_curr.transpose();
+
+    // Matrix logarithm map: e_R = log(R_err) \in so(3)
+    double trace = R_err.trace();
+    double cos_theta = std::clamp((trace - 1.0) * 0.5, -1.0, 1.0);
+    double theta = std::acos(cos_theta);
+    Eigen::Vector3d vee(
+        R_err(2, 1) - R_err(1, 2),
+        R_err(0, 2) - R_err(2, 0),
+        R_err(1, 0) - R_err(0, 1)
+    );
+    Eigen::Vector3d e_R;
+    if (theta < 1e-5) {
+        e_R = 0.5 * (1.0 + theta * theta / 6.0) * vee;
+    } else {
+        e_R = (0.5 * theta / std::sin(theta)) * vee;
+    }
+
+    // Express rotation error and angular velocity in robot heading frame (R_z(yaw))
+    // so gains kp_roll, kp_pitch apply along vehicle longitudinal and lateral axes
+    Eigen::Vector3d e_R_heading = R_yaw.transpose() * e_R;
+    Eigen::Vector3d omega_heading = R_yaw.transpose() * body_state.angular_velocity;
+
+    Eigen::Vector3d alpha_heading = Eigen::Vector3d::Zero();
+    alpha_heading.x() = params_.kp_roll  * e_R_heading.x() - params_.kd_roll  * omega_heading.x();
+    alpha_heading.y() = params_.kp_pitch * e_R_heading.y() - params_.kd_pitch * omega_heading.y();
+
+    // Transform desired angular acceleration back to world frame for SRBD
+    desired_angular_accel = R_yaw * alpha_heading;
 }
 
 double BalanceController::computeAdaptiveNominalHeight(
@@ -220,7 +272,8 @@ ControlOutput BalanceController::updateHybrid(
     const std::array<bool, NUM_LEGS>& contact_valid,
     const TerrainState& terrain_state,
     double dt,
-    bool e_stop_active)
+    bool e_stop_active,
+    const Eigen::Vector3d& cmd_vel)
 {
     ControlOutput output;
 
@@ -264,12 +317,22 @@ ControlOutput BalanceController::updateHybrid(
     double active_ik_pitch = std::clamp(safe_pitch + pitch_corr, -params_.max_pitch, params_.max_pitch);
 
     Eigen::Vector4d ik_target = kinematics_->computePostureIK(
-        h_adapt, active_ik_roll, active_ik_pitch, current_steer_angles, terrain_state.rotation);
+        h_adapt, active_ik_roll, active_ik_pitch, current_steer_angles, terrain_state.rotation, current_config_);
 
     for (int i = 0; i < 4; ++i) {
         ik_target(i) = std::clamp(ik_target(i), params_.min_ecc_angle, params_.max_ecc_angle);
-        // Singularity avoidance: enforce minimum bend of 15 deg (0.26 rad)
-        if (i == FL || i == FR) {
+        // Singularity avoidance: enforce minimum bend of 15 deg (0.26 rad) along the configuration sign branch
+        bool is_front = (i == FL || i == FR);
+        bool target_positive = true;
+        if (current_config_ == PostureConfiguration::OUTWARD) {
+            target_positive = is_front;
+        } else if (current_config_ == PostureConfiguration::INWARD) {
+            target_positive = !is_front;
+        } else if (current_config_ == PostureConfiguration::SPIN) {
+            target_positive = (i == FL || i == RL);
+        }
+
+        if (target_positive) {
             ik_target(i) = std::max(0.26, ik_target(i));
         } else {
             ik_target(i) = std::min(-0.26, ik_target(i));
@@ -279,11 +342,12 @@ ControlOutput BalanceController::updateHybrid(
     // ================================================================
     // 2. Compute GRF-based torque command
     // ================================================================
-    // 2a. PD controller → desired acceleration (using h_adapt)
+    // 2a. PD controller → desired acceleration (using h_adapt) + inertial feedforward
     Eigen::Vector3d desired_lin_accel, desired_ang_accel;
     computeDesiredAcceleration(h_adapt, safe_roll, safe_pitch,
                                current_ecc_angles, body_state,
-                               desired_lin_accel, desired_ang_accel);
+                               desired_lin_accel, desired_ang_accel,
+                               cmd_vel, dt);
 
     // 2b. Set SRBD state and solve QP for optimal GRFs
     srbd_model_.setState(body_state, contact_points, contact_valid);
@@ -383,16 +447,20 @@ ControlOutput BalanceController::updateHybrid(
         double meas_torque = std::abs(current_ecc_efforts(i));
         double delta_tau = meas_torque - nom_torque;
 
+        // Decouple virtual compliance authority from w_grf so shock absorption is maintained
+        // even when w_grf approaches 0 near max height (0.22m)
+        double compliance_scale = std::clamp(w_grf, 0.35, 1.0);
+
         double raw_shift = 0.0;
         if (delta_tau > params_.compliance_deadband) {
             // Impact / excess load -> Retract
             double excess = delta_tau - params_.compliance_deadband;
-            raw_shift = sign_leg * (w_grf * excess) / (params_.compliance_k + 1e-4);
+            raw_shift = sign_leg * (compliance_scale * excess) / (params_.compliance_k + 1e-4);
             raw_shift = std::clamp(raw_shift, -params_.max_compliance_shift, params_.max_compliance_shift);
         } else if (delta_tau < -params_.compliance_deadband) {
             // Airborne / lost load -> Extend downwards to seek ground
             double deficit = -delta_tau - params_.compliance_deadband;
-            raw_shift = -sign_leg * (w_grf * deficit) / (params_.ground_seeking_k + 1e-4);
+            raw_shift = -sign_leg * (compliance_scale * deficit) / (params_.ground_seeking_k + 1e-4);
             raw_shift = std::clamp(raw_shift, -params_.ground_seeking_max_shift, params_.ground_seeking_max_shift);
         }
 

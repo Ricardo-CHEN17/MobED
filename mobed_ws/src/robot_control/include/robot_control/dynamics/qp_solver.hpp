@@ -43,20 +43,27 @@ struct QpResult {
 };
 
 /**
- * @brief Solve a small-scale box-constrained QP with optional equality constraints.
+ * @brief Solve QP using the Goldfarb-Idnani Dual Active-Set Algorithm (QuadProg++).
  *
- * For the MobED use case (n=4, m=2), this is extremely efficient.
- * Uses the KKT conditions with null-space method for equality constraints,
- * then projects the unconstrained solution onto the feasible box.
+ * Paper Ref [29]: D. Goldfarb and A. Idnani, "A numerically stable dual method
+ * for solving strictly convex quadratic programs," Mathematical Programming, 1983.
+ *
+ * Solves:
+ *     min  0.5 * x^T * H * x + f^T * x
+ *     s.t. lb <= x <= ub               (box inequality constraints)
+ *          A_eq * x = b_eq             (optional equality constraints)
+ *
+ * Computes the exact global KKT minimum in a finite number of active-set pivots.
+ * For small problems (n <= 4), converges in 1-4 iterations with machine precision.
  *
  * @param problem  QP problem definition
- * @param max_iter Maximum iterations for iterative refinement (default: 50)
- * @param tol      Convergence tolerance (default: 1e-6)
+ * @param max_iter Maximum active-set pivot iterations (default: 100)
+ * @param tol      Constraint violation tolerance (default: 1e-8)
  * @return QpResult with optimal solution and convergence info
  */
-inline QpResult solveQP(const QpProblem& problem, int max_iter = 50, double tol = 1e-6) {
+inline QpResult solveQP(const QpProblem& problem, int max_iter = 100, double tol = 1e-8) {
     QpResult result;
-    int n = problem.H.rows();
+    int n = static_cast<int>(problem.H.rows());
 
     // Validate input dimensions
     if (problem.f.size() != n || problem.lb.size() != n || problem.ub.size() != n) {
@@ -66,134 +73,143 @@ inline QpResult solveQP(const QpProblem& problem, int max_iter = 50, double tol 
     }
 
     bool has_eq = (problem.A_eq.rows() > 0 && problem.A_eq.cols() == n);
-    int m_eq = has_eq ? problem.A_eq.rows() : 0;
+    int m_eq = has_eq ? static_cast<int>(problem.A_eq.rows()) : 0;
+
+    // Inequality constraints: C_I^T * x >= b_I
+    //   [  I ] x >= lb
+    //   [ -I ] x >= -ub
+    int m_ineq = 2 * n;
+    Eigen::MatrixXd CI(n, m_ineq);
+    CI.block(0, 0, n, n) = Eigen::MatrixXd::Identity(n, n);
+    CI.block(0, n, n, n) = -Eigen::MatrixXd::Identity(n, n);
+
+    Eigen::VectorXd bI(m_ineq);
+    bI.head(n) = problem.lb;
+    bI.tail(n) = -problem.ub;
+
+    // Invert positive-definite Hessian H
+    Eigen::LDLT<Eigen::MatrixXd> ldlt_H(problem.H);
+    if (ldlt_H.info() != Eigen::Success) {
+        result.converged = false;
+        result.x = Eigen::VectorXd::Zero(n);
+        return result;
+    }
+    Eigen::MatrixXd H_inv = ldlt_H.solve(Eigen::MatrixXd::Identity(n, n));
+
+    Eigen::VectorXd x;
+    std::vector<int> A;  // active inequality constraint indices
+    Eigen::VectorXd u = Eigen::VectorXd::Zero(m_ineq);
 
     if (!has_eq) {
-        // ================================================================
-        // Case 1: Box-constrained QP only (no equality constraints)
-        // Projected gradient descent with Barzilai-Borwein step size
-        // ================================================================
-        Eigen::VectorXd x = 0.5 * (problem.lb + problem.ub);  // initialize at center
+        x = -H_inv * problem.f;
+    } else {
+        // Solve unconstrained KKT with equality constraints alone
+        int kkt_size = n + m_eq;
+        Eigen::MatrixXd KKT = Eigen::MatrixXd::Zero(kkt_size, kkt_size);
+        KKT.block(0, 0, n, n) = problem.H;
+        KKT.block(0, n, n, m_eq) = problem.A_eq.transpose();
+        KKT.block(n, 0, m_eq, n) = problem.A_eq;
 
-        for (int iter = 0; iter < max_iter; ++iter) {
-            // Gradient: g = H*x + f
-            Eigen::VectorXd g = problem.H * x + problem.f;
+        Eigen::VectorXd rhs(kkt_size);
+        rhs.head(n) = -problem.f;
+        rhs.tail(m_eq) = problem.b_eq;
 
-            // Projected gradient step
-            // Use a conservative step size based on H's diagonal
-            double step = 1.0 / problem.H.diagonal().maxCoeff();
-
-            Eigen::VectorXd x_new = x - step * g;
-
-            // Project onto bounds
-            for (int i = 0; i < n; ++i) {
-                x_new(i) = std::clamp(x_new(i), problem.lb(i), problem.ub(i));
-            }
-
-            // Check convergence
-            double dx = (x_new - x).norm();
-            x = x_new;
-
-            if (dx < tol) {
-                result.converged = true;
-                result.iterations = iter + 1;
-                break;
-            }
-        }
-
-        result.x = x;
-        result.cost = 0.5 * x.dot(problem.H * x) + problem.f.dot(x);
-        if (!result.converged) result.iterations = max_iter;
-        return result;
+        Eigen::VectorXd sol = KKT.ldlt().solve(rhs);
+        x = sol.head(n);
     }
 
-    // ================================================================
-    // Case 2: QP with equality constraints + box constraints
-    // Use KKT system with iterative projection (ADMM-like)
-    // ================================================================
-
-    // Build the KKT system:
-    //   [ H    A_eq^T ] [ x     ]   [ -f    ]
-    //   [ A_eq   0    ] [ lambda ] = [  b_eq ]
-    int kkt_size = n + m_eq;
-    Eigen::MatrixXd KKT = Eigen::MatrixXd::Zero(kkt_size, kkt_size);
-    KKT.block(0, 0, n, n) = problem.H;
-    KKT.block(0, n, n, m_eq) = problem.A_eq.transpose();
-    KKT.block(n, 0, m_eq, n) = problem.A_eq;
-
-    Eigen::VectorXd rhs(kkt_size);
-    rhs.head(n) = -problem.f;
-    rhs.tail(m_eq) = problem.b_eq;
-
-    // Solve unconstrained KKT
-    Eigen::VectorXd sol = KKT.ldlt().solve(rhs);
-    Eigen::VectorXd x_unc = sol.head(n);
-
-    // Check if unconstrained solution satisfies bounds
-    bool all_feasible = true;
-    for (int i = 0; i < n; ++i) {
-        if (x_unc(i) < problem.lb(i) - tol || x_unc(i) > problem.ub(i) + tol) {
-            all_feasible = false;
-            break;
-        }
-    }
-
-    if (all_feasible) {
-        // Unconstrained optimum is already feasible — we're done
-        result.x = x_unc;
-        result.cost = 0.5 * x_unc.dot(problem.H * x_unc) + problem.f.dot(x_unc);
-        result.converged = true;
-        result.iterations = 1;
-        return result;
-    }
-
-    // Iterative projection: alternate between solving KKT and projecting onto bounds
-    // This is a simplified ADMM approach suitable for our small problem size
-    double rho = problem.H.diagonal().mean();  // penalty parameter
-    Eigen::VectorXd z = 0.5 * (problem.lb + problem.ub);  // auxiliary variable
-    Eigen::VectorXd u = Eigen::VectorXd::Zero(n);          // dual variable
-
-    // Augmented KKT for ADMM
-    Eigen::MatrixXd KKT_aug = Eigen::MatrixXd::Zero(kkt_size, kkt_size);
-    KKT_aug.block(0, 0, n, n) = problem.H + rho * Eigen::MatrixXd::Identity(n, n);
-    KKT_aug.block(0, n, n, m_eq) = problem.A_eq.transpose();
-    KKT_aug.block(n, 0, m_eq, n) = problem.A_eq;
-
-    Eigen::LDLT<Eigen::MatrixXd> kkt_solver(KKT_aug);
-
-    Eigen::VectorXd x = z;
-    for (int iter = 0; iter < max_iter; ++iter) {
-        // x-update: solve augmented KKT
-        Eigen::VectorXd rhs_aug(kkt_size);
-        rhs_aug.head(n) = -problem.f + rho * (z - u);
-        rhs_aug.tail(m_eq) = problem.b_eq;
-
-        Eigen::VectorXd sol_aug = kkt_solver.solve(rhs_aug);
-        x = sol_aug.head(n);
-
-        // z-update: project (x + u) onto bounds
-        Eigen::VectorXd z_old = z;
-        for (int i = 0; i < n; ++i) {
-            z(i) = std::clamp(x(i) + u(i), problem.lb(i), problem.ub(i));
+    for (int it = 0; it < max_iter; ++it) {
+        // Evaluate violations: viol_j = b_I(j) - c_j^T * x
+        Eigen::VectorXd viol = bI - CI.transpose() * x;
+        for (int a_idx : A) {
+            viol(a_idx) = -1e10;  // already active
         }
 
-        // u-update: dual ascent
-        u += x - z;
-
-        // Check convergence (primal and dual residuals)
-        double primal_res = (x - z).norm();
-        double dual_res = rho * (z - z_old).norm();
-
-        if (primal_res < tol && dual_res < tol) {
+        int p = 0;
+        double max_viol = viol.maxCoeff(&p);
+        if (max_viol <= tol) {
+            result.x = x;
+            result.cost = 0.5 * x.dot(problem.H * x) + problem.f.dot(x);
             result.converged = true;
-            result.iterations = iter + 1;
-            break;
+            result.iterations = it + 1;
+            return result;
+        }
+
+        // Inner dual active-set pivoting loop for constraint p
+        while (true) {
+            Eigen::VectorXd c_p = CI.col(p);
+            int m_active = m_eq + static_cast<int>(A.size());
+
+            if (m_active == 0) {
+                Eigen::VectorXd d = H_inv * c_p;
+                double denom = c_p.dot(d);
+                double t1 = (denom > 1e-14) ? ((bI(p) - c_p.dot(x)) / denom) : 1e20;
+                x += t1 * d;
+                u(p) = t1;
+                A.push_back(p);
+                break;
+            } else {
+                Eigen::MatrixXd N(n, m_active);
+                if (has_eq) {
+                    N.block(0, 0, n, m_eq) = problem.A_eq.transpose();
+                }
+                for (size_t i = 0; i < A.size(); ++i) {
+                    N.col(m_eq + static_cast<int>(i)) = CI.col(A[i]);
+                }
+
+                Eigen::MatrixXd M = N.transpose() * H_inv * N;
+                Eigen::VectorXd r = M.ldlt().solve(N.transpose() * H_inv * c_p);
+                Eigen::VectorXd d = H_inv * (c_p - N * r);
+
+                double denom = c_p.dot(d);
+                double t1 = (denom > 1e-14) ? ((bI(p) - c_p.dot(x)) / denom) : 1e20;
+
+                double t2 = 1e20;
+                int k_drop_idx = -1;
+                for (size_t i = 0; i < A.size(); ++i) {
+                    int a_idx = A[i];
+                    double r_val = r(m_eq + static_cast<int>(i));
+                    if (r_val > 1e-12) {
+                        double step_k = u(a_idx) / r_val;
+                        if (step_k < t2) {
+                            t2 = step_k;
+                            k_drop_idx = static_cast<int>(i);
+                        }
+                    }
+                }
+
+                if (t1 >= 1e19 && t2 >= 1e19) {
+                    // Infeasible or degenerate dual direction
+                    result.x = x;
+                    result.cost = 0.5 * x.dot(problem.H * x) + problem.f.dot(x);
+                    result.converged = false;
+                    result.iterations = it + 1;
+                    return result;
+                }
+
+                double step = std::min(t1, t2);
+                x += step * d;
+                for (size_t i = 0; i < A.size(); ++i) {
+                    u(A[i]) -= step * r(m_eq + static_cast<int>(i));
+                }
+
+                if (t1 <= t2) {
+                    u(p) = step;
+                    A.push_back(p);
+                    break;
+                } else {
+                    int dropped_a = A[k_drop_idx];
+                    A.erase(A.begin() + k_drop_idx);
+                    u(dropped_a) = 0.0;
+                }
+            }
         }
     }
 
-    result.x = z;  // z is the feasible solution
-    result.cost = 0.5 * z.dot(problem.H * z) + problem.f.dot(z);
-    if (!result.converged) result.iterations = max_iter;
+    result.x = x;
+    result.cost = 0.5 * x.dot(problem.H * x) + problem.f.dot(x);
+    result.converged = false;
+    result.iterations = max_iter;
     return result;
 }
 

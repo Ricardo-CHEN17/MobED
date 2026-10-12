@@ -88,12 +88,17 @@ std::tuple<Eigen::Vector4d, Eigen::Vector4d> DrivingController::update(
     const Eigen::Vector4d& current_ecc_angles,
     double dt,
     bool e_stop_active,
-    bool is_homing) {
+    bool is_homing,
+    const Eigen::Vector4d& current_steer_vels,
+    const Eigen::Vector4d& current_wheel_vels) {
 
     // First time initialization to current hardware state
     if (!initialized_) {
         prev_steer_angles_ = current_steer_angles;
         prev_wheel_speeds_.setZero();
+        steer_torques_.setZero();
+        wheel_torques_.setZero();
+        wheel_speed_integrals_.setZero();
         initialized_ = true;
     }
 
@@ -101,6 +106,9 @@ std::tuple<Eigen::Vector4d, Eigen::Vector4d> DrivingController::update(
         // E-STOP: Lock steering, stop wheels immediately
         prev_wheel_speeds_.setZero();
         filtered_bank_angle_ = 0.0;
+        steer_torques_.setZero();
+        wheel_torques_.setZero();
+        wheel_speed_integrals_.setZero();
         return {prev_steer_angles_, prev_wheel_speeds_};
     }
 
@@ -164,7 +172,24 @@ std::tuple<Eigen::Vector4d, Eigen::Vector4d> DrivingController::update(
         final_steer(i) = kinematics_->normalize_angle(prev_steer_angles_(i) + steer_delta);
     }
 
-    // 5. Update state and return
+    // ============================================================
+    // 5. Low-Level Actuator Torque Loops (Paper Fig. 8 & Dual-Layer Mode)
+    // ============================================================
+    for (int i = 0; i < 4; ++i) {
+        // Steering angle PD torque
+        double e_str = kinematics_->normalize_angle(final_steer(i) - current_steer_angles(i));
+        double tau_str = params_.kp_steer * e_str - params_.kd_steer * current_steer_vels(i);
+        steer_torques_(i) = std::clamp(tau_str, -params_.max_steer_torque, params_.max_steer_torque);
+
+        // Wheel speed PI torque with anti-windup & traction saturation
+        double e_whl = final_speed(i) - current_wheel_vels(i);
+        wheel_speed_integrals_(i) += e_whl * dt;
+        wheel_speed_integrals_(i) = std::clamp(wheel_speed_integrals_(i), -10.0, 10.0);
+        double tau_whl = params_.kp_wheel * e_whl + params_.ki_wheel * wheel_speed_integrals_(i);
+        wheel_torques_(i) = std::clamp(tau_whl, -params_.max_wheel_torque, params_.max_wheel_torque);
+    }
+
+    // 6. Update state and return
     prev_steer_angles_ = final_steer;
     prev_wheel_speeds_ = final_speed;
 

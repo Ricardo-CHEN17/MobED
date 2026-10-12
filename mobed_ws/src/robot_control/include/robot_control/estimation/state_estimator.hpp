@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <Eigen/Dense>
 #include "robot_control/core/mobed_types.hpp"
 #include "robot_control/core/robot_params.hpp"
@@ -47,19 +48,30 @@ public:
      * @param steer_vels       Current steering joint velocities [FL, FR, RL, RR] (rad/s)
      * @param ecc_vels         Current eccentric joint velocities [FL, FR, RL, RR] (rad/s)
      * @param omega_body       Current body angular velocity measured by gyroscope (rad/s)
+     * @param contact_valid    Contact validity flags per leg [FL, FR, RL, RR] (filters airborne legs)
      */
     void correctWithOdometry(const Eigen::Vector4d& wheel_velocities,
                              const Eigen::Vector4d& steer_angles,
                              const Eigen::Vector4d& ecc_angles,
                              const Eigen::Vector4d& steer_vels,
                              const Eigen::Vector4d& ecc_vels,
-                             const Eigen::Vector3d& omega_body);
+                             const Eigen::Vector3d& omega_body,
+                             const std::array<bool, NUM_LEGS>& contact_valid = {true, true, true, true});
+
+    void setImuLeverArm(const Eigen::Vector3d& lever_arm) { imu_lever_arm_ = lever_arm; }
+    Eigen::Vector3d getImuLeverArm() const { return imu_lever_arm_; }
 
     /**
      * @brief Get the current estimated body state.
      * @return BodyState with position, orientation, linear and angular velocity.
      */
     BodyState getState() const;
+
+    /**
+     * @brief Get the estimated accelerometer and gyroscope biases.
+     */
+    Eigen::Vector3d getAccelBias() const { return x_.segment<3>(9); }
+    Eigen::Vector3d getGyroBias()  const { return x_.segment<3>(12); }
 
     /**
      * @brief Reset the estimator to initial conditions.
@@ -76,8 +88,8 @@ private:
     bool initialized_ = false;
 
     // ---- EKF State ----
-    // State: [px, py, pz, vx, vy, vz, droll, dpitch, dyaw]
-    static constexpr int STATE_DIM = 9;
+    // State: [px, py, pz, vx, vy, vz, droll, dpitch, dyaw, bax, bay, baz, bgx, bgy, bgz]
+    static constexpr int STATE_DIM = 15;
     Eigen::Matrix<double, STATE_DIM, 1> x_;        // state vector
     Eigen::Matrix<double, STATE_DIM, STATE_DIM> P_; // state covariance
 
@@ -88,11 +100,14 @@ private:
     // ---- Orientation tracking (quaternion, maintained separately) ----
     Eigen::Quaterniond orientation_;
     Eigen::Vector3d latest_omega_body_ = Eigen::Vector3d::Zero();
+    Eigen::Vector3d prev_omega_body_ = Eigen::Vector3d::Zero();
+    Eigen::Vector3d imu_lever_arm_ = Eigen::Vector3d::Zero();
+    Eigen::Vector3d latest_accel_body_unbiased_ = Eigen::Vector3d::Zero();
 
     /**
      * @brief Build the state transition Jacobian F for the prediction step.
      * @param dt Time step
-     * @return 9x9 Jacobian matrix
+     * @return 15x15 Jacobian matrix
      */
     Eigen::Matrix<double, STATE_DIM, STATE_DIM> computeF(double dt) const;
 };

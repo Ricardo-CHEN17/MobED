@@ -18,6 +18,23 @@ enum LegIndex : int {
 };
 
 // ============================================================================
+// Posture Configuration Convention (IEEE RA-L 2026 Paper Section II.B & Fig 5)
+// ============================================================================
+enum class PostureConfiguration : int {
+    OUTWARD = 0,  // Standard outdoor cruising: front outward (>0), rear outward (<0)
+    INWARD  = 1,  // Compact indoor navigation: front inward (<0), rear inward (>0), min wheelbase 728mm
+    SPIN    = 2   // In-place spin alignment: tangential orientation for minimum turning resistance
+};
+
+// ============================================================================
+// Climb Strategy Mode Convention (Scheme 1 Explicit Mode Partitioning)
+// ============================================================================
+enum class ClimbMode : int {
+    LOW_80MM     = 1,  // Default: Terrain adaptive balance + 50~80mm curb FSM
+    HIGH_200MM   = 2   // 200mm high stair dynamic 180° flip FSM
+};
+
+// ============================================================================
 // Sensor Data — raw inputs from hardware / simulation
 // ============================================================================
 struct ImuData {

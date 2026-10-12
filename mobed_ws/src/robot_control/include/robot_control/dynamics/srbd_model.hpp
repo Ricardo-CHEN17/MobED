@@ -67,8 +67,30 @@ public:
      */
     std::vector<int> getContactLegIndices() const;
 
+    /**
+     * @brief Set the payload mass and geometry (IEEE RA-L 2026 Paper Section II.B & III.E.2).
+     *
+     * Dynamically updates total mass m and inertia tensor I using parallel axis theorem.
+     *
+     * @param payload_mass      Payload mass in kg (up to 56 kg)
+     * @param payload_z_offset  Payload CoM height above chassis origin in meters (default 0.15m)
+     */
+    void setPayload(double payload_mass, double payload_z_offset = 0.15);
+
+    double getTotalMass() const { return current_total_mass_; }
+    double getPayloadMass() const { return payload_mass_; }
+    double getComZShift() const { return com_z_shift_; }
+    Eigen::Matrix3d getCompositeInertia() const { return current_inertia_; }
+
 private:
     RobotParams params_;
+
+    // Payload state (Section II.B & III.E.2)
+    double payload_mass_ = 0.0;
+    double payload_z_offset_ = 0.15;
+    double current_total_mass_ = 28.4;
+    double com_z_shift_ = 0.0;
+    Eigen::Matrix3d current_inertia_ = Eigen::Matrix3d::Identity();
 
     // Current state
     BodyState body_state_;

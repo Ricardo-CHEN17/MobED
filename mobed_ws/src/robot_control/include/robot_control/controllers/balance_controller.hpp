@@ -106,9 +106,18 @@ public:
         const std::array<bool, NUM_LEGS>& contact_valid,
         const TerrainState& terrain_state,
         double dt,
-        bool e_stop_active = false);
+        bool e_stop_active = false,
+        const Eigen::Vector3d& cmd_vel = Eigen::Vector3d::Zero());
 
-    void reset() { initialized_ = false; }
+    void reset() { initialized_ = false; prev_cmd_vel_.setZero(); }
+    void syncCurrentAngles(const Eigen::Vector4d& current_ecc_angles) { prev_ecc_angles_ = current_ecc_angles; }
+
+    void setPayloadMass(double mass);
+    void setPostureConfiguration(PostureConfiguration config) { current_config_ = config; }
+    PostureConfiguration getPostureConfiguration() const { return current_config_; }
+
+    dynamics::GrfOptimizer& getGrfOptimizer() { return grf_optimizer_; }
+    const dynamics::GrfOptimizer& getGrfOptimizer() const { return grf_optimizer_; }
 
     /**
      * @brief Compute slope- and bank-adaptive nominal height (Headroom Management).
@@ -124,6 +133,7 @@ private:
     BalanceControllerParams params_;
     RobotParams robot_params_;
     std::shared_ptr<kinematics::MobedKinematics> kinematics_;
+    PostureConfiguration current_config_ = PostureConfiguration::OUTWARD;
 
     // Dynamics modules
     dynamics::SrbdModel srbd_model_;
@@ -133,6 +143,7 @@ private:
     Eigen::Vector4d start_ecc_angles_;
     Eigen::Vector4d prev_compliance_shift_;  // IIR filter state for virtual damping (Task 3.1)
     mutable double prev_h_adapt_ = 0.18;     // IIR filter state for adaptive height smoothing
+    mutable Eigen::Vector3d prev_cmd_vel_ = Eigen::Vector3d::Zero();
     bool initialized_ = false;
     double time_since_init_ = 0.0;
     const double STARTUP_DURATION = 3.0; // 3 seconds to smoothly stand up
@@ -158,13 +169,17 @@ private:
      * @param body_state Current estimated body state
      * @param[out] desired_linear_accel Linear acceleration command (world frame)
      * @param[out] desired_angular_accel Angular acceleration command (world frame)
+     * @param cmd_vel Commanded chassis velocity for inertial load transfer feedforward
+     * @param dt Time step
      */
     void computeDesiredAcceleration(
         double target_height, double target_roll, double target_pitch,
         const Eigen::Vector4d& current_ecc_angles,
         const BodyState& body_state,
         Eigen::Vector3d& desired_linear_accel,
-        Eigen::Vector3d& desired_angular_accel) const;
+        Eigen::Vector3d& desired_angular_accel,
+        const Eigen::Vector3d& cmd_vel = Eigen::Vector3d::Zero(),
+        double dt = 0.01) const;
 };
 
 }  // namespace controllers

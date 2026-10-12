@@ -27,6 +27,14 @@ struct DrivingControllerParams {
     double cog_height = 0.18;     // m, approximate CoG height
     // Low-pass filter coefficient for smoothing bank angle transitions
     double bank_angle_filter = 0.05;  // 0=frozen, 1=instant
+
+    // ---- Low-Level Actuator Torque Loops (Paper Fig. 8 & Dual-Layer Mode) ----
+    double kp_steer = 300.0;        // Nm/rad (steering PD proportional gain)
+    double kd_steer = 30.0;         // Nm·s/rad (steering PD derivative gain)
+    double kp_wheel = 15.0;         // Nm/(rad/s) (wheel speed PI proportional gain)
+    double ki_wheel = 0.5;          // Nm/rad (wheel speed PI integral gain)
+    double max_steer_torque = 35.0; // Nm (steering actuator saturation limit)
+    double max_wheel_torque = 25.0; // Nm (driving wheel traction saturation limit)
 };
 
 class DrivingController {
@@ -43,6 +51,8 @@ public:
      * @param dt Time step since last call
      * @param e_stop_active Emergency stop flag
      * @param is_homing Whether the robot is in homing mode
+     * @param current_steer_vels Feedback steering joint velocities [FL, FR, RL, RR] (rad/s)
+     * @param current_wheel_vels Feedback wheel rotational velocities [FL, FR, RL, RR] (rad/s)
      * @return std::tuple<Eigen::Vector4d, Eigen::Vector4d> (target_steer_angles, target_wheel_speeds)
      */
     std::tuple<Eigen::Vector4d, Eigen::Vector4d> update(
@@ -51,7 +61,19 @@ public:
         const Eigen::Vector4d& current_ecc_angles,
         double dt,
         bool e_stop_active = false,
-        bool is_homing = false);
+        bool is_homing = false,
+        const Eigen::Vector4d& current_steer_vels = Eigen::Vector4d::Zero(),
+        const Eigen::Vector4d& current_wheel_vels = Eigen::Vector4d::Zero());
+
+    /**
+     * @brief Get synthesized low-level steering torques (Paper Fig. 8)
+     */
+    Eigen::Vector4d getSteerTorques() const { return steer_torques_; }
+
+    /**
+     * @brief Get synthesized low-level driving wheel torques with traction limits (Paper Fig. 8)
+     */
+    Eigen::Vector4d getWheelTorques() const { return wheel_torques_; }
 
     /**
      * @brief Get the bank angle (roll) induced by centripetal force during turning.
@@ -81,7 +103,14 @@ public:
      */
     double computeBankAngle(const Eigen::Vector3d& cmd_vel) const;
 
-    void reset() { initialized_ = false; filtered_bank_angle_ = 0.0; zero_cmd_duration_ = 0.0; }
+    void reset() {
+        initialized_ = false;
+        filtered_bank_angle_ = 0.0;
+        zero_cmd_duration_ = 0.0;
+        steer_torques_.setZero();
+        wheel_torques_.setZero();
+        wheel_speed_integrals_.setZero();
+    }
 
 private:
     DrivingControllerParams params_;
@@ -89,6 +118,11 @@ private:
 
     Eigen::Vector4d prev_steer_angles_;
     Eigen::Vector4d prev_wheel_speeds_;
+
+    // Actuator torque loops
+    Eigen::Vector4d steer_torques_ = Eigen::Vector4d::Zero();
+    Eigen::Vector4d wheel_torques_ = Eigen::Vector4d::Zero();
+    Eigen::Vector4d wheel_speed_integrals_ = Eigen::Vector4d::Zero();
 
     bool initialized_ = false;
     double filtered_bank_angle_ = 0.0;  // smoothed bank angle output

@@ -31,6 +31,8 @@ class GrfOptimizer {
 public:
     explicit GrfOptimizer(const RobotParams& params = RobotParams());
 
+    void setRobotParams(const RobotParams& params) { params_ = params; }
+
     /**
      * @brief Compute optimal vertical GRFs for all legs.
      *
@@ -87,9 +89,17 @@ public:
 
     // Tuning parameters (Paper Eq 13: min ||A*f - b||_Q^2 + ||f||_R^2 + ||f - f_prev||_P^2)
     double max_grf_per_leg = 500.0;        // N, maximum force per leg
-    double weight_Q = 100.0;               // Weight for dynamics soft constraint (Q)
+    // 6D diagonal weight vector for Q matrix (forces [fx, fy, fz] + torques [tau_roll, tau_pitch, tau_yaw])
+    // Prioritizes attitude leveling torques (500 Nm) over linear forces to eliminate chassis sway
+    Eigen::Matrix<double, 6, 1> diag_Q = (Eigen::Matrix<double, 6, 1>() <<
+        10.0, 10.0, 100.0,     // fx, fy, fz (N)
+        500.0, 500.0, 10.0     // tau_roll, tau_pitch, tau_yaw (Nm)
+    ).finished();
     double weight_R = 0.01;                // Weight for absolute force regularization (R)
     double weight_P = 1.0;                 // Weight for force smoothing penalty (P)
+
+    void setQWeights(const Eigen::Matrix<double, 6, 1>& q_weights) { diag_Q = q_weights; }
+    Eigen::Matrix<double, 6, 1> getQWeights() const { return diag_Q; }
 
 private:
     RobotParams params_;

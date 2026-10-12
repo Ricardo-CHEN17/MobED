@@ -71,7 +71,6 @@ void ContactDetector::update(
     double dt)
 {
     if (dt <= 0.0 || dt > 0.5) return;
-    (void)chassis_forward_vel;  // Decoupled in favor of per-wheel stall detection
 
     // First call: just store the initial values
     if (!initialized_) {
@@ -87,6 +86,12 @@ void ContactDetector::update(
     // Forward command gate: only check impact when driving forward
     bool forward_cmd_active = (cmd_forward_vel > 0.05);
 
+    // Chassis blockage gate:
+    // A true obstacle (>=5cm vertical stair/wall) physically halts the robot's forward progress,
+    // causing forward chassis velocity to drop to near zero (vx < chassis_blocked_vel_threshold).
+    bool chassis_blocked = forward_cmd_active &&
+                           (chassis_forward_vel < params_.chassis_blocked_vel_threshold);
+
     for (int i = 0; i < NUM_LEGS; ++i) {
         // ============================================================
         // 1. Compute smoothed torque rates (dτ/dt)
@@ -98,36 +103,53 @@ void ContactDetector::update(
             wheel_effort_history_[i], wheel_efforts(i), dt);
 
         // ============================================================
-        // 2. Two-Stage Impact Detection (Shock Onset + Sustained Load):
+        // 2. Multi-Modal Impact & Blockage Detection:
         //
-        // Stage 1 (Shock Onset):
-        // When a sudden transient spike in eccentric torque rate occurs,
-        // arm a collision observation window (0.35s).
+        // Accounts for wheel slip on vertical obstacle faces where the drive
+        // wheel spins (1.3~3.0 rad/s) without dropping below stall velocity threshold.
         // ============================================================
-        if (std::abs(ecc_torque_rates_(i)) > params_.contact_torque_rate_threshold) {
+        bool is_front_wheel = (i == FL || i == FR);
+        double ecc_thresh = is_front_wheel ? params_.contact_torque_threshold : 2.5;
+        bool ecc_loaded = (std::abs(ecc_efforts(i)) > ecc_thresh);
+
+        bool wheel_stalled = (std::abs(wheel_efforts(i)) > params_.wheel_stall_torque_threshold) &&
+                             (std::abs(wheel_velocities(i)) < params_.wheel_stall_vel_threshold);
+
+        // Obstacle-blocked slip: forward command active, chassis halted, wheel heavily loaded (>2.8 Nm)
+        bool wheel_slipping_blocked = forward_cmd_active && chassis_blocked &&
+                                     (std::abs(wheel_efforts(i)) > 2.8);
+
+        // Stage 1 (Shock Onset / Obstacle Face Arrival):
+        // Arm observation window if:
+        // - Eccentric torque rate spike (|dτ/dt| > 25 Nm/s), OR
+        // - Wheel torque rate spike (|dτ/dt| > 35 Nm/s), OR
+        // - Drive wheel stalled, OR
+        // - Chassis blocked with heavily loaded drive wheel
+        bool shock_onset = (std::abs(ecc_torque_rates_(i)) > params_.contact_torque_rate_threshold) ||
+                           (std::abs(wheel_torque_rates_(i)) > 35.0) ||
+                           (forward_cmd_active && wheel_stalled) ||
+                           (forward_cmd_active && wheel_slipping_blocked);
+
+        if (shock_onset) {
             shock_window_timer_[i] = params_.shock_window_duration;
         }
 
         // ============================================================
         // Stage 2 (Per-Wheel Sustained Load Confirmation):
-        // While within the shock window, if:
-        //   1. Forward motion is actively commanded (forward_cmd_active)
-        //   2. The eccentric link experiences sustained resistive torque load (|τ_ecc| > contact_torque_threshold)
-        //   3. That specific drive wheel is stalled against an obstacle face (|τ_wheel| > 7.0 Nm AND |ω_wheel| < 0.5 rad/s)
-        // accumulate the sustain confirmation timer for this wheel independently!
-        //
-        // This decouples unilateral obstacle impacts: when only FL hits a curb,
-        // FL stalls independently while FR continues to roll, allowing FL to confirm
-        // without waiting for the whole chassis to stop.
+        // While within the shock window:
+        // Accumulate sustain timer when sustained forward driving is verified
+        // by stall, eccentric load + drive torque, or blocked slip.
         // ============================================================
         if (shock_window_timer_[i] > 0.0) {
             shock_window_timer_[i] = std::max(0.0, shock_window_timer_[i] - dt);
 
-            bool ecc_loaded = (std::abs(ecc_efforts(i)) > params_.contact_torque_threshold);
-            bool wheel_stalled = (std::abs(wheel_efforts(i)) > params_.wheel_stall_torque_threshold) &&
-                                 (std::abs(wheel_velocities(i)) < params_.wheel_stall_vel_threshold);
+            bool contact_sustained = forward_cmd_active && (
+                wheel_stalled ||
+                (ecc_loaded && std::abs(wheel_efforts(i)) > 2.8) ||
+                (wheel_slipping_blocked && (ecc_loaded || std::abs(wheel_efforts(i)) > 3.0))
+            );
 
-            if (forward_cmd_active && ecc_loaded && wheel_stalled) {
+            if (contact_sustained) {
                 sustain_timer_[i] += dt;
                 if (sustain_timer_[i] >= params_.sustain_confirm_duration) {
                     impact_flags_[i] = true;

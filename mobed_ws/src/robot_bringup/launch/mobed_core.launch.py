@@ -26,5 +26,5 @@ def generate_launch_description():
             emulate_tty=True
         )
         
-        # 故意省略 mobed_teleop 节点，留作单独的终端启动
+        # 键盘遥控由宿主机独立浮动控制看板 mac_teleop_gui.py 经 UDP 自动无缝转发至 ROS 2 话题。
     ])
