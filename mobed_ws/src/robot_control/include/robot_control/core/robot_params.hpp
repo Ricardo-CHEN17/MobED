@@ -82,13 +82,16 @@ struct RobotParams {
     double contact_torque_threshold      = 4.2;    // Nm, sustained effort load for obstacle collision confirmation (gravity load on flat is 2.2~2.6 Nm; true obstacle collision is >4.5 Nm)
     double contact_torque_rate_threshold = 25.0;   // Nm/s, shock onset rate threshold to arm observation window (smooth approach ~35 Nm/s, flat <5 Nm/s)
     double shock_window_duration         = 0.35;   // s, transient shock observation window (ample margin for motor ramp-up)
-    double sustain_confirm_duration      = 0.05;   // s, required sustained load duration to confirm impact (5 frames at 100Hz)
+    double sustain_confirm_duration      = 0.20;   // s, required sustained load duration to confirm impact (20 frames at 100Hz)
     double wheel_stall_torque_threshold  = 3.0;    // Nm, drive wheel resistance confirmation (flat ground is < 1.8 Nm)
     double wheel_stall_vel_threshold     = 0.8;    // rad/s, maximum wheel rotation speed under true curb stall
     double ramp_inhibit_slope_threshold  = 0.078;  // rad (~4.5 deg), pure pitch slope steeper than this inhibits stair climbing
     double ramp_inhibit_pitch_threshold  = 0.087;  // rad (~5.0 deg), instantaneous IMU pitch threshold (Track 1A ramp is 11.3 deg)
     double ramp_inhibit_pitch_rate_threshold = 0.25;   // rad/s (~14.3 deg/s), instantaneous IMU pitch rate threshold
-    double chassis_blocked_vel_threshold = 0.05;   // m/s, forward chassis speed threshold indicating true rigid blockage (accounts for differential slip)
+    double chassis_blocked_vel_threshold = 0.08;   // m/s, forward chassis speed threshold indicating true rigid blockage (accounts for differential slip)
+    double contact_evidence_threshold    = 0.75;   // Integrated evidence threshold [0, 1] to confirm obstacle collision
+    double contact_evidence_decay_rate   = 3.0;    // Evidence decay rate (1/s) during flat unblocked rolling
+    double kinematic_decel_shock_thresh  = 0.8;    // m/s^2, minimum longitudinal deceleration shock magnitude to register as impact evidence
 
     // -----------------------------------------------
     // Terrain Filter & Micro-Bump Decoupling Parameters

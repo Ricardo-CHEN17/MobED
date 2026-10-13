@@ -73,6 +73,8 @@ class UdpInterfaceNode(Node):
 
         # ---------- Watchdog state ----------
         self.last_recv_time = time.monotonic()
+        self.has_received_packet = False
+        self.last_valid_positions = None
 
         self.get_logger().info(
             f'UDP Interface started — listening on :9001, sending to {self.mac_addr}')
@@ -159,16 +161,18 @@ class UdpInterfaceNode(Node):
 
         if latest_state is not None:
             self.last_recv_time = now
+            self.has_received_packet = True
+            self.last_valid_positions = latest_state
             self._publish_joint_states(latest_state, latest_velocity, latest_effort)
             if latest_imu is not None:
                 self._publish_imu(latest_imu)
-        elif (now - self.last_recv_time) > WATCHDOG_TIMEOUT:
-            # Watchdog triggered — publish safe zeros so control node doesn't
-            # drive blindly with stale data
+        elif self.has_received_packet and (now - self.last_recv_time) > WATCHDOG_TIMEOUT:
+            # Watchdog triggered — hold last valid positions and zero velocities so control node doesn't
+            # drive blindly with stale motion, while avoiding injecting destructive 0.0 posture angles
             self.get_logger().warn(
-                'No UDP data from Mac for >0.5 s — publishing zero state',
+                'No UDP data from Mac for >0.5 s — holding last joint positions and zeroing velocities',
                 throttle_duration_sec=2.0)
-            self._publish_joint_states([0.0] * 12, None, None)
+            self._publish_joint_states(self.last_valid_positions, [0.0] * 12, [0.0] * 12)
 
         if latest_teleop is not None:
             self._publish_teleop(latest_teleop)
@@ -179,7 +183,7 @@ class UdpInterfaceNode(Node):
         cmd.twist.linear.x = float(t.get('vx', 0.0))
         cmd.twist.linear.y = float(t.get('vy', 0.0))
         cmd.twist.angular.z = float(t.get('wz', 0.0))
-        cmd.body_height = float(t.get('height', 0.18))
+        cmd.body_height = float(t.get('height', 0.205))
         cmd.body_roll = float(t.get('roll', 0.0))
         cmd.body_pitch = float(t.get('pitch', 0.0))
         self.pub_cmd.publish(cmd)

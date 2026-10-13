@@ -167,26 +167,54 @@ Eigen::Vector3d MobedKinematics::computeFootPositionInBase(
     );
 }
 
-std::pair<double, double> MobedKinematics::getForbiddenSteerSector(int leg_index, double q_ecc) const {
-    // Only when eccentric angle lifts the wheel into the chassis Z-plane (q_ecc > 0.45 rad)
-    // does any mechanical collision risk exist (Section III.D in paper).
-    if (std::abs(q_ecc) < 0.45) {
-        return {0.0, 0.0}; // No forbidden sector, full 360 deg safe!
-    }
-
-    // Expand collision forbidden sector slightly if eccentric arm is extensively rotated (crouch mode)
-    double extra = (std::abs(q_ecc) > 1.0) ? 0.20 : 0.0;
-
-    bool is_left_side = (leg_index == FL || leg_index == RL);
-    if (is_left_side) {
-        // Left legs (FL, RL): Inward quadrant points towards -Y (clockwise rotation)
-        // Forbidden inward sector: approximately [-150 deg, -30 deg]
-        return {-2.62 - extra, -0.52 + extra};
+MobedKinematics::SteerForbiddenSector MobedKinematics::getForbiddenSteerSectorInfo(int leg_index) const {
+    // 166-degree under-belly / narrow-track forbidden sector
+    // FL (0) & RR (3): dangerous inward swing centers at -2.539 rad (-145.5 deg)
+    // FR (1) & RL (2): dangerous inward swing centers at +2.539 rad (+145.5 deg)
+    // Half width is 1.449 rad (83.0 deg), covering a total under-belly collapse span of 166 deg
+    SteerForbiddenSector sector;
+    sector.half_width = 1.449;
+    sector.active = true;
+    if (leg_index == FL || leg_index == RR) {
+        sector.center_angle = -2.539;
     } else {
-        // Right legs (FR, RR): Inward quadrant points towards +Y (counter-clockwise rotation)
-        // Forbidden inward sector: approximately [+30 deg, +150 deg]
-        return {0.52 - extra, 2.62 + extra};
+        sector.center_angle = 2.539;
     }
+    return sector;
+}
+
+bool MobedKinematics::isSteerInForbiddenSector(int leg_index, double steer_angle, double margin) const {
+    auto sector = getForbiddenSteerSectorInfo(leg_index);
+    if (!sector.active) return false;
+    double dist = std::abs(normalize_angle(steer_angle - sector.center_angle));
+    return dist < (sector.half_width + margin);
+}
+
+double MobedKinematics::clampToSafeSteerSector(int leg_index, double steer_angle, double margin) const {
+    auto sector = getForbiddenSteerSectorInfo(leg_index);
+    if (!sector.active) return normalize_angle(steer_angle);
+    double delta = normalize_angle(steer_angle - sector.center_angle);
+    double dist = std::abs(delta);
+    double limit = sector.half_width + margin;
+    if (dist < limit) {
+        // Project to nearest safe boundary outside the forbidden sector
+        double sgn = (delta >= 0.0) ? 1.0 : -1.0;
+        return normalize_angle(sector.center_angle + sgn * limit);
+    }
+    return normalize_angle(steer_angle);
+}
+
+double MobedKinematics::getOptimalOutwardStanceAngle(int leg_index) const {
+    // Widest track width stance (|Y| = 0.229m):
+    // FL (0) & RR (3): +35 deg (+0.61 rad)
+    // FR (1) & RL (2): -35 deg (-0.61 rad)
+    return (leg_index == FL || leg_index == RR) ? 0.61 : -0.61;
+}
+
+std::pair<double, double> MobedKinematics::getForbiddenSteerSector(int leg_index, double /*q_ecc*/) const {
+    auto sector = getForbiddenSteerSectorInfo(leg_index);
+    return {normalize_angle(sector.center_angle - sector.half_width),
+            normalize_angle(sector.center_angle + sector.half_width)};
 }
 
 } // namespace kinematics

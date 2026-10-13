@@ -19,15 +19,26 @@ public:
     virtual ~ContactDetector() = default;
 
     /**
-     * @brief Feed new joint effort data and geometric state to update detection.
+     * @brief Feed new joint effort data, IMU acceleration, and geometric state to update detection.
      */
     void update(const Eigen::Vector4d& ecc_efforts,
                 const Eigen::Vector4d& wheel_efforts,
                 const Eigen::Vector4d& wheel_velocities,
                 double chassis_forward_vel,
                 double cmd_forward_vel,
+                double imu_accel_x,
                 const ClimbGeometry& geometry,
                 double dt);
+
+    void update(const Eigen::Vector4d& ecc_efforts,
+                const Eigen::Vector4d& wheel_efforts,
+                const Eigen::Vector4d& wheel_velocities,
+                double chassis_forward_vel,
+                double cmd_forward_vel,
+                const ClimbGeometry& geometry,
+                double dt) {
+        update(ecc_efforts, wheel_efforts, wheel_velocities, chassis_forward_vel, cmd_forward_vel, 0.0, geometry, dt);
+    }
 
     void update(const Eigen::Vector4d& ecc_efforts,
                 const Eigen::Vector4d& wheel_efforts,
@@ -72,6 +83,11 @@ public:
     Eigen::Vector4d getEccTorqueRates() const { return ecc_torque_rates_; }
 
     /**
+     * @brief Get the integrated obstacle contact evidence score [0.0, 1.0].
+     */
+    double getFrontEvidenceScore() const { return front_evidence_score_; }
+
+    /**
      * @brief Reset all detection state and history buffers.
      */
     void reset();
@@ -85,6 +101,11 @@ private:
     // Smoothed torque rates
     Eigen::Vector4d ecc_torque_rates_;
     Eigen::Vector4d wheel_torque_rates_;
+
+    // Evidence integrator for front axle obstacle contact
+    double front_evidence_score_ = 0.0;
+    double front_evidence_sustain_timer_ = 0.0;
+    double prev_cmd_vel_ = 0.0;
 
     // Two-stage detection timers per leg
     std::array<double, NUM_LEGS> shock_window_timer_;

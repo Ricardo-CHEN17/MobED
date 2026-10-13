@@ -30,9 +30,8 @@ enum class PostureConfiguration : int {
 // Climb Strategy Mode Convention (Unified Adaptive Architecture 40mm ~ 200mm)
 // ============================================================================
 enum class ClimbMode : int {
-    ADAPTIVE     = 1,  // Unified continuous 40mm~200mm near-level compliant FSM
-    LOW_80MM     = 1,  // Backward-compatibility alias
-    HIGH_200MM   = 2   // Backward-compatibility alias (maps to high curb adaptive)
+    DISABLED     = 0,  // Flat cruising mode: climbing trigger inhibited
+    ADAPTIVE     = 1   // Unified continuous 40mm~200mm near-level compliant FSM
 };
 
 // ============================================================================

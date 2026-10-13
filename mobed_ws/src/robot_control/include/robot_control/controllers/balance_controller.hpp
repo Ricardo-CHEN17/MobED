@@ -26,6 +26,7 @@ struct BalanceControllerParams {
     double kd_attitude_roll  = 0.08;  // damping scale on gyro wx [rad/s -> rad]
     double kp_attitude_pitch = 1.0;   // dimensionless scale on pitch error [rad -> rad]
     double kd_attitude_pitch = 0.08;  // damping scale on gyro wy [rad/s -> rad]
+    double attitude_deadband  = 0.008; // ~0.46 deg deadband on attitude errors to eliminate gyro noise amplification
 
     // ---- Gain Scheduling (Paper Eq 16-17) ----
     // Controls the blend between dynamics-based torque (GRF) and
@@ -56,12 +57,13 @@ struct BalanceControllerParams {
 
     // ---- Bilateral Admittance & Ground-Seeking Parameters (Phase 2.7) ----
     double compliance_k             = 50.0; // Nm/rad (torque admittance stiffness for bump absorption)
-    double compliance_deadband      = 1.0;  // Nm (torque deadband to prevent micro-fluctuation jitter)
+    double compliance_deadband      = 3.6;  // Nm (torque deadband to prevent micro-fluctuation jitter with kp=300 servos)
     double max_compliance_shift     = 0.35; // rad (~20 deg), maximum upward compliance adjustment
     double ground_seeking_k         = 30.0; // Nm/rad (downward admittance stiffness when wheel is airborne)
     double ground_seeking_max_shift = 0.25; // rad (~14.3 deg), maximum downward ground-seeking extension
     double compliance_filter_alpha  = 0.20; // dimensionless, normal IIR smoothing coefficient [0, 1]
     double touch_loss_decay_alpha   = 0.45; // dimensionless, fast touch-loss recovery decay coefficient
+    double effort_lpf_alpha         = 0.20; // dimensionless, 15Hz low-pass filter for measured joint efforts
 };
 
 class BalanceController {
@@ -109,7 +111,13 @@ public:
         bool e_stop_active = false,
         const Eigen::Vector3d& cmd_vel = Eigen::Vector3d::Zero());
 
-    void reset() { initialized_ = false; prev_cmd_vel_.setZero(); }
+    void reset() {
+        initialized_ = false;
+        prev_cmd_vel_.setZero();
+        prev_compliance_shift_.setZero();
+        prev_h_adapt_ = 0.205;
+        time_since_init_ = 0.0;
+    }
     void syncCurrentAngles(const Eigen::Vector4d& current_ecc_angles) { prev_ecc_angles_ = current_ecc_angles; }
 
     void setPayloadMass(double mass);
@@ -142,7 +150,8 @@ private:
     Eigen::Vector4d prev_ecc_angles_;
     Eigen::Vector4d start_ecc_angles_;
     Eigen::Vector4d prev_compliance_shift_;  // IIR filter state for virtual damping (Task 3.1)
-    mutable double prev_h_adapt_ = 0.18;     // IIR filter state for adaptive height smoothing
+    Eigen::Vector4d filtered_ecc_efforts_ = Eigen::Vector4d::Zero(); // 15Hz LPF for measured efforts
+    mutable double prev_h_adapt_ = 0.205;    // IIR filter state for adaptive height smoothing (nominal 0.205m)
     mutable Eigen::Vector3d prev_cmd_vel_ = Eigen::Vector3d::Zero();
     bool initialized_ = false;
     double time_since_init_ = 0.0;

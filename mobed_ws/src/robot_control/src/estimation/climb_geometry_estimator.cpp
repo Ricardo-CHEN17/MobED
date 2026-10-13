@@ -46,9 +46,8 @@ void ClimbGeometryEstimator::update(
     geometry_.body_pitch = body_state.pitch();
     geometry_.body_roll = body_state.roll();
 
-    Eigen::Matrix3d R = body_state.orientation.toRotationMatrix();
-    // R(2, 0) is world Z component of body +X (forward nose) vector
-    geometry_.nose_up_pitch = std::asin(std::clamp(R(2, 0), -1.0, 1.0));
+    // Standardized positive nose-up pitch
+    geometry_.nose_up_pitch = geometry_.body_pitch;
     // When nose is pitching up, omega_body.y() < 0 (right-hand rule around body +Y left axis)
     geometry_.nose_up_pitch_rate = -omega_body.y();
 

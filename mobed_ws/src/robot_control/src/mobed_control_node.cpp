@@ -51,7 +51,7 @@ public:
         contact_detector_    = std::make_unique<estimation::ContactDetector>(robot_params_);
         climb_geometry_estimator_ = std::make_unique<estimation::ClimbGeometryEstimator>(robot_params_);
         task_controller_     = std::make_unique<tasks::TaskController>();
-        task_controller_->setModeProfile(climb_mode_);
+        task_controller_->setClimbMode(climb_mode_);
 
         // ============================================================
         // Initialize state variables
@@ -157,27 +157,35 @@ public:
                 }
             });
 
-        // Climb Mode / Profile Subscription: 1 = ADAPTIVE / LOW_80MM, 2 = HIGH_200MM
+        // Climb Mode Subscription: 0 = DISABLED, 1 = ADAPTIVE
         sub_climb_mode_ = this->create_subscription<std_msgs::msg::Int32>(
             "/mobed/climb_mode", 10,
             [this](const std_msgs::msg::Int32::SharedPtr msg) {
-                if (msg->data == 1 || msg->data == 2) {
+                if (msg->data == 0 || msg->data == 1) {
                     auto new_mode = static_cast<ClimbMode>(msg->data);
                     if (new_mode != climb_mode_) {
-                        const char* mode_name = (new_mode == ClimbMode::HIGH_200MM) ? "HIGH_200MM" : "ADAPTIVE";
+                        const char* mode_name = (new_mode == ClimbMode::DISABLED) ? "DISABLED" : "ADAPTIVE";
                         RCLCPP_INFO(this->get_logger(), "Climb mode changed to: %s (%d)", mode_name, msg->data);
                         climb_mode_ = new_mode;
                         contact_detector_->reset();
                         task_controller_->reset();
-                        task_controller_->setModeProfile(climb_mode_);
+                        task_controller_->setClimbMode(climb_mode_);
                         state_estimator_->reset();
                         terrain_estimator_->reset();
                         balance_controller_->syncCurrentAngles(curr_ecc_angles_);
                         target_height_ = 0.205;
                         transition_smoother_.start(curr_ecc_angles_, curr_wheel_velocities_, 1.0, 1.0, 0.25);
                     }
+                } else if (msg->data == 2) {
+                    // Backward-compatibility: map legacy mode 2 directly to ADAPTIVE with 200mm target height
+                    if (climb_mode_ != ClimbMode::ADAPTIVE) {
+                        RCLCPP_INFO(this->get_logger(), "Climb mode set to: ADAPTIVE (via legacy mode 2 request)");
+                        climb_mode_ = ClimbMode::ADAPTIVE;
+                        task_controller_->setClimbMode(climb_mode_);
+                    }
+                    task_controller_->setCurbHeight(0.20);
                 } else {
-                    RCLCPP_WARN(this->get_logger(), "Invalid climb mode: %d (1:ADAPTIVE, 2:HIGH_200MM)", msg->data);
+                    RCLCPP_WARN(this->get_logger(), "Invalid climb mode: %d (0:DISABLED, 1:ADAPTIVE)", msg->data);
                 }
             });
 
@@ -193,6 +201,7 @@ public:
         timer_ = this->create_wall_timer(10ms,
             std::bind(&MobedControlNode::timerCallback, this));
         last_time_ = this->now();
+        last_cmd_vel_time_ = this->now();
 
         RCLCPP_INFO(this->get_logger(),
             "MobED Control Node started. Full pipeline: "
@@ -204,13 +213,16 @@ private:
     // Callback: Teleop/Navigation Command
     // ================================================================
     void commandCallback(const robot_interfaces::msg::MobEDCommand::SharedPtr msg) {
-        cmd_vel_(0) = msg->twist.linear.x;
-        cmd_vel_(1) = msg->twist.linear.y;
-        cmd_vel_(2) = msg->twist.angular.z;
+        cmd_vel_(0) = std::clamp(msg->twist.linear.x, -1.2, 1.2);
+        cmd_vel_(1) = std::clamp(msg->twist.linear.y, -1.2, 1.2);
+        cmd_vel_(2) = std::clamp(msg->twist.angular.z, -2.0, 2.0);
+        last_cmd_vel_time_ = this->now();
 
-        target_height_ = msg->body_height;
-        target_roll_   = msg->body_roll;
-        target_pitch_  = msg->body_pitch;
+        if (msg->body_height >= 0.08) {
+            target_height_ = std::clamp(msg->body_height, 0.08, 0.22);
+        }
+        target_roll_   = std::clamp(msg->body_roll,  -0.35, 0.35);
+        target_pitch_  = std::clamp(msg->body_pitch, -0.35, 0.35);
     }
 
     // ================================================================
@@ -327,7 +339,12 @@ private:
             }
         }
 
-        joints_initialized_ = true;
+        if (!joints_initialized_) {
+            for (int i = 0; i < 4; ++i) {
+                prev_cad_ecc_[i] = curr_ecc_angles_(i) * ecc_signs_[i] + ecc_offsets_[i];
+            }
+            joints_initialized_ = true;
+        }
     }
 
     // ================================================================
@@ -359,6 +376,11 @@ private:
 
         if (dt <= 0.0 || dt > 0.5) return;
         if (!joints_initialized_) return;  // Wait for first real joint state before running any control
+
+        // Teleop watchdog: decay cmd_vel_ to zero if no command received for > 0.5s
+        if ((now - last_cmd_vel_time_).seconds() > 0.5) {
+            cmd_vel_.setZero();
+        }
 
         transition_smoother_.update(dt);
 
@@ -460,9 +482,10 @@ private:
         Eigen::Vector3d v_body = R_base.transpose() * body_state.linear_velocity;
         double chassis_forward_vel = v_body.x();
 
+        double imu_accel_x = imu_received_ ? latest_imu_.linear_acceleration.x() : 0.0;
         contact_detector_->update(
             curr_ecc_efforts_, curr_wheel_efforts_, curr_wheel_velocities_,
-            chassis_forward_vel, active_cmd_vel.x(),
+            chassis_forward_vel, active_cmd_vel.x(), imu_accel_x,
             climb_geometry_estimator_->getGeometry(), dt);
 
         // ============================================================
@@ -495,7 +518,8 @@ private:
 
             bool is_on_ramp = !front_wheel_stalled && (steady_ramp || transient_ramp);
 
-            bool obstacle_climb_permitted = forward_straight_active && !is_on_ramp;
+            bool obstacle_climb_permitted = (climb_mode_ != ClimbMode::DISABLED) &&
+                                            forward_straight_active && !is_on_ramp;
 
             // Only reset contact detector when explicitly reversing or driving backwards
             if (!task_controller_->isActive() && cmd_vel_(0) < -0.05) {
@@ -513,8 +537,7 @@ private:
         std::string curr_state_name = task_controller_->getStateName();
         if (curr_state_name != prev_state_name) {
             auto mask = task_controller_->getOverrideMask();
-            RCLCPP_INFO(this->get_logger(), "[Mode %d] FSM Transition: %s -> %s | Overrides: [FL:%d FR:%d RL:%d RR:%d]",
-                        static_cast<int>(climb_mode_),
+            RCLCPP_INFO(this->get_logger(), "[Adaptive FSM] Transition: %s -> %s | Overrides: [FL:%d FR:%d RL:%d RR:%d]",
                         prev_state_name.c_str(), curr_state_name.c_str(),
                         mask[FL], mask[FR], mask[RL], mask[RR]);
             prev_state_name = curr_state_name;
@@ -539,13 +562,23 @@ private:
         double active_roll   = is_homing_ ? 0.0 : target_roll_;
         double active_pitch  = is_homing_ ? 0.0 : target_pitch_;
 
-        // Overlay bank angle from driving controller onto target roll
-        active_roll += driving_controller_->getBankAngle();
+        // Overlay bank angle from driving controller onto target roll (only during active motion, not homing)
+        if (!is_homing_) {
+            active_roll += driving_controller_->getBankAngle();
+        }
 
         // Prepare terrain state for BalanceController:
-        // When climbing an obstacle, zero out longitudinal pitch slope compensation
+        // During homing, enforce flat horizontal terrain to prevent uncalibrated IMU drift from tilting the posture.
+        // When climbing an obstacle, zero out longitudinal pitch slope compensation.
         TerrainState active_terrain_state = terrain_state;
-        if (task_controller_->isActive()) {
+        if (is_homing_) {
+            active_terrain_state.pitch_slope = 0.0;
+            active_terrain_state.roll_slope = 0.0;
+            active_terrain_state.slope_angle = 0.0;
+            active_terrain_state.normal = Eigen::Vector3d::UnitZ();
+            active_terrain_state.rotation = Eigen::Matrix3d::Identity();
+            active_terrain_state.is_valid = true;
+        } else if (task_controller_->isActive()) {
             active_terrain_state.pitch_slope = 0.0;
             active_terrain_state.rotation = Eigen::AngleAxisd(
                 active_terrain_state.roll_slope, Eigen::Vector3d::UnitX()).toRotationMatrix();
@@ -613,20 +646,14 @@ private:
             double steer_effort = driving_controller_->getSteerTorques()(i) * steer_signs_[i];
             cmd_msg.effort.push_back(steer_effort);
 
-            // Eccentric: math → CAD (with continuous Unwrap + blend-out lerp)
+            // Eccentric: math → CAD
             cmd_msg.name.push_back(ecc_names[i]);
 
-            // 1. Convert math-frame target to raw CAD frame
+            // Convert math-frame target directly to CAD frame (target_ecc is already smooth and continuous)
             double raw_cad = target_ecc(i) * ecc_signs_[i] + ecc_offsets_[i];
+            prev_cad_ecc_[i] = raw_cad;
 
-            // 2. Shortest-arc tracking from current measured joint position
-            double curr_cad = curr_ecc_angles_(i) * ecc_signs_[i] + ecc_offsets_[i];
-            double delta = std::atan2(std::sin(raw_cad - curr_cad),
-                                      std::cos(raw_cad - curr_cad));
-            double safe_cad = curr_cad + delta;
-            prev_cad_ecc_[i] = safe_cad;
-
-            cmd_msg.position.push_back(safe_cad);
+            cmd_msg.position.push_back(raw_cad);
             cmd_msg.velocity.push_back(0.0);
 
             // Zero out feedforward GRF torque for FSM-overridden legs to prevent conflict with position trajectory
@@ -635,6 +662,7 @@ private:
             double effort_cmd = leg_is_overridden
                               ? 0.0
                               : balance_out.ecc_torques(i) * ecc_signs_[i] * ff_weight;
+            effort_cmd = std::clamp(effort_cmd, -50.0, 50.0);
             cmd_msg.effort.push_back(effort_cmd);
 
             // Wheels: math → CAD
@@ -673,7 +701,7 @@ private:
     std::unique_ptr<estimation::ClimbGeometryEstimator> climb_geometry_estimator_;
 
     RobotParams robot_params_;
-    ClimbMode climb_mode_ = ClimbMode::LOW_80MM;
+    ClimbMode climb_mode_ = ClimbMode::ADAPTIVE;
 
     // Zero-Jerk Mode Transition Smoother (0.2s Cosine S-curve)
     struct TransitionSmoother {
@@ -734,6 +762,7 @@ private:
 
     rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::Time last_time_;
+    rclcpp::Time last_cmd_vel_time_;
 
     // ================================================================
     // State Variables

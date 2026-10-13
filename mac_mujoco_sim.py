@@ -116,7 +116,7 @@ class SimTeleopBridge:
 
         connected = self.check_connection()
         posture_names = {0: "OUTWARD (432mm)", 1: "INWARD (167mm)", 2: "SPIN (0-radius)"}
-        climb_names = {1: "MODE 1: LOW / ADAPTIVE", 2: "MODE 2: HIGH 200MM"}
+        climb_names = {0: "DISABLED", 1: "ADAPTIVE", 2: "ADAPTIVE"}
 
         status_text = "● GUI CONNECTED" if connected else "○ WAITING FOR GUI (mac_teleop_gui.py)"
 
@@ -134,7 +134,7 @@ class SimTeleopBridge:
             f"{status_text}\n"
             f"Vx={self.vx:+.2f} m/s, Wz={self.wz:+.2f} rad/s\n"
             f"H={self.height*1000:.0f}mm | {posture_names.get(self.posture_mode, 'UNKNOWN')}\n"
-            f"{self.curb_height*1000:.0f}mm | {climb_names.get(self.climb_mode, 'MODE 1')}\n"
+            f"{self.curb_height*1000:.0f}mm | CLIMB: {climb_names.get(self.climb_mode, 'ADAPTIVE')}\n"
             f"{'LOCKED (E-STOP)' if self.e_stop else 'READY'}"
         )
 
@@ -271,14 +271,8 @@ def main():
                             data.ctrl[i] = msg['cmd'][i]
                     # Reset applied generalized forces
                     data.qfrc_applied[:] = 0.0
-                    if 'torque' in msg and len(msg['torque']) == 12:
-                        # Feedforward torque injection (MIT Hybrid Impedance Control)
-                        for i in range(4, 8):  # Eccentric posture joints
-                            jname = JOINT_NAMES[i]
-                            jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, jname)
-                            if jid != -1:
-                                dof_adr = model.jnt_dofadr[jid]
-                                data.qfrc_applied[dof_adr] = float(msg['torque'][i])
+                    # Note: Actuators in MuJoCo model are <position kp="300" kv="30"> position servos.
+                    # Bypassing qfrc_applied prevents dual-controller fighting and eliminates jitter/limit cycles.
             except Exception:
                 pass
 

@@ -225,8 +225,8 @@ class TeleopDashboardApp:
                                 command=self._curb_up, relief="flat", padx=4)
         btn_curb_up.pack(side="left", padx=2)
 
-        self.btn_climb = tk.Button(row3, text="CLIMB: MODE 1 LOW 80mm (\\)", font=("Helvetica", 9, "bold"),
-                                   bg=BTN_BG, fg=TEXT_MAIN, command=self._cycle_climb, relief="flat", padx=10)
+        self.btn_climb = tk.Button(row3, text="CLIMB: ENABLED (Adaptive \\)", font=("Helvetica", 9, "bold"),
+                                   bg=BTN_ACTIVE, fg=TEXT_MAIN, command=self._cycle_climb, relief="flat", padx=10)
         self.btn_climb.pack(side="right")
 
         btn_neutral = tk.Button(row3, text="RESET POSE (0)", font=("Helvetica", 9), bg=BTN_BG, fg=TEXT_MUTED,
@@ -276,19 +276,15 @@ class TeleopDashboardApp:
         self.lbl_curb.configure(text=f"Curb Target [ / ]:  {self.curb_height*1000:.0f} mm")
 
     def _curb_up(self):
-        self.curb_height = min(0.15, round(self.curb_height + 0.005, 3))
+        self.curb_height = min(0.22, round(self.curb_height + 0.005, 3))
         self.lbl_curb.configure(text=f"Curb Target [ / ]:  {self.curb_height*1000:.0f} mm")
 
     def _cycle_climb(self):
-        self.climb_mode = 2 if self.climb_mode == 1 else 1
-        if self.climb_mode == 2:
-            self.height = 0.220
-        else:
-            self.height = 0.205
-        self._update_attitude_labels()
-        modes = {1: "MODE 1: LOW 80mm (\\)", 2: "MODE 2: HIGH 200mm (\\)"}
-        self.btn_climb.configure(text=f"CLIMB: {modes[self.climb_mode]}",
-                                 bg=BTN_ACTIVE if self.climb_mode == 2 else BTN_BG)
+        # Toggle between 1 (ADAPTIVE ENABLED) and 0 (DISABLED)
+        self.climb_mode = 0 if self.climb_mode == 1 else 1
+        text = "CLIMB: ENABLED (Adaptive \\)" if self.climb_mode == 1 else "CLIMB: DISABLED (\\)"
+        self.btn_climb.configure(text=text,
+                                 bg=BTN_ACTIVE if self.climb_mode == 1 else BTN_BG)
 
     def _reset_pose(self):
         self.height = 0.205

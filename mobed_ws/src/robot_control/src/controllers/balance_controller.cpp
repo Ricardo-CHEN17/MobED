@@ -14,6 +14,7 @@ BalanceController::BalanceController(const BalanceControllerParams& params,
 {
     prev_ecc_angles_.setZero();
     prev_compliance_shift_.setZero();
+    filtered_ecc_efforts_.setZero();
 }
 
 void BalanceController::setPayloadMass(double mass) {
@@ -296,22 +297,44 @@ ControlOutput BalanceController::updateHybrid(
     double h_adapt = computeAdaptiveNominalHeight(
         target_height, terrain_state.pitch_slope, terrain_state.roll_slope, safe_roll);
 
+    bool is_in_startup = !initialized_ || (time_since_init_ < STARTUP_DURATION);
+
     // Fast IMU Attitude Residual Feedback:
     // Terrain slope feedforward is already handled geometrically via terrain_state.rotation in computePostureIK.
     // The attitude PD loop only eliminates dynamic disturbances and residual unmodeled error.
-    double roll_current  = body_state.roll();
-    double pitch_current = body_state.pitch();
-    double omega_x = body_state.angular_velocity.x();
-    double omega_y = body_state.angular_velocity.y();
+    // Suppress attitude corrections during initial startup trajectory so uncalibrated/transient IMU states don't tilt the standing posture.
+    double roll_corr  = 0.0;
+    double pitch_corr = 0.0;
+    if (!is_in_startup) {
+        double roll_current  = body_state.roll();
+        double pitch_current = body_state.pitch();
+        double omega_x = body_state.angular_velocity.x();
+        double omega_y = body_state.angular_velocity.y();
 
-    double roll_err  = roll_current - safe_roll;
-    double pitch_err = pitch_current - safe_pitch;
+        double roll_err  = roll_current - safe_roll;
+        double pitch_err = pitch_current - safe_pitch;
 
-    // Command residual corrections (expanded to ±0.18 rad ≈ ±10.3 deg) to ensure adequate leveling authority
-    double roll_corr  = -(params_.kp_attitude_roll  * roll_err  + params_.kd_attitude_roll  * omega_x);
-    double pitch_corr = -(params_.kp_attitude_pitch * pitch_err + params_.kd_attitude_pitch * omega_y);
-    roll_corr  = std::clamp(roll_corr,  -0.18, 0.18);
-    pitch_corr = std::clamp(pitch_corr, -0.18, 0.18);
+        // Apply deadband on attitude errors to eliminate gyro noise amplification on flat ground
+        if (std::abs(roll_err) < params_.attitude_deadband) {
+            roll_err = 0.0;
+        } else {
+            roll_err -= std::copysign(params_.attitude_deadband, roll_err);
+        }
+        if (std::abs(pitch_err) < params_.attitude_deadband) {
+            pitch_err = 0.0;
+        } else {
+            pitch_err -= std::copysign(params_.attitude_deadband, pitch_err);
+        }
+
+        omega_x = std::clamp(omega_x, -1.5, 1.5);
+        omega_y = std::clamp(omega_y, -1.5, 1.5);
+
+        // Command residual corrections (expanded to ±0.18 rad ≈ ±10.3 deg) to ensure adequate leveling authority
+        roll_corr  = -(params_.kp_attitude_roll  * roll_err  + params_.kd_attitude_roll  * omega_x);
+        pitch_corr = -(params_.kp_attitude_pitch * pitch_err + params_.kd_attitude_pitch * omega_y);
+        roll_corr  = std::clamp(roll_corr,  -0.18, 0.18);
+        pitch_corr = std::clamp(pitch_corr, -0.18, 0.18);
+    }
 
     double active_ik_roll  = std::clamp(safe_roll  + roll_corr,  -params_.max_roll,  params_.max_roll);
     double active_ik_pitch = std::clamp(safe_pitch + pitch_corr, -params_.max_pitch, params_.max_pitch);
@@ -450,39 +473,47 @@ ControlOutput BalanceController::updateHybrid(
         double sign_leg = (smoothed_ik(i) >= 0.0) ? 1.0 : -1.0;
         double J_z = grf_optimizer_.computeVerticalJacobian(
             i, current_ecc_angles(i), current_steer_angles(i), safe_roll, safe_pitch);
-        double dyn_fz = (optimal_grf(i) > 1e-3) ? optimal_grf(i) : (robot_params_.total_mass * 9.81 / NUM_LEGS);
+        double dyn_fz = (optimal_grf(i) > 1e-3) ? optimal_grf(i) : (robot_params_.body_mass * 9.81 / NUM_LEGS);
         double nom_torque = std::abs(J_z * dyn_fz);
-        double meas_torque = std::abs(current_ecc_efforts(i));
+        // 15Hz Low-pass filtering on measured torque to suppress contact impulse spikes
+        double raw_effort = std::abs(current_ecc_efforts(i));
+        filtered_ecc_efforts_(i) += params_.effort_lpf_alpha * (raw_effort - filtered_ecc_efforts_(i));
+        double meas_torque = filtered_ecc_efforts_(i);
         double delta_tau = meas_torque - nom_torque;
 
-        // Decouple virtual compliance authority from w_grf so shock absorption is maintained
-        // even when w_grf approaches 0 near max height (0.22m)
-        double compliance_scale = std::clamp(w_grf, 0.35, 1.0);
+        if (is_in_startup) {
+            prev_compliance_shift_.setZero();
+            compliant_ecc_pos(i) = smoothed_ik(i);
+        } else {
+            // Decouple virtual compliance authority from w_grf so shock absorption is maintained
+            // even when w_grf approaches 0 near max height (0.22m)
+            double compliance_scale = std::clamp(w_grf, 0.35, 1.0);
 
-        double raw_shift = 0.0;
-        if (delta_tau > params_.compliance_deadband) {
-            // Impact / excess load -> Retract
-            double excess = delta_tau - params_.compliance_deadband;
-            raw_shift = sign_leg * (compliance_scale * excess) / (params_.compliance_k + 1e-4);
-            raw_shift = std::clamp(raw_shift, -params_.max_compliance_shift, params_.max_compliance_shift);
-        } else if (delta_tau < -params_.compliance_deadband) {
-            // Airborne / lost load -> Extend downwards to seek ground
-            double deficit = -delta_tau - params_.compliance_deadband;
-            raw_shift = -sign_leg * (compliance_scale * deficit) / (params_.ground_seeking_k + 1e-4);
-            raw_shift = std::clamp(raw_shift, -params_.ground_seeking_max_shift, params_.ground_seeking_max_shift);
+            double raw_shift = 0.0;
+            if (delta_tau > params_.compliance_deadband) {
+                // Impact / excess load -> Retract
+                double excess = delta_tau - params_.compliance_deadband;
+                raw_shift = sign_leg * (compliance_scale * excess) / (params_.compliance_k + 1e-4);
+                raw_shift = std::clamp(raw_shift, -params_.max_compliance_shift, params_.max_compliance_shift);
+            } else if (delta_tau < -params_.compliance_deadband) {
+                // Airborne / lost load -> Extend downwards to seek ground
+                double deficit = -delta_tau - params_.compliance_deadband;
+                raw_shift = -sign_leg * (compliance_scale * deficit) / (params_.ground_seeking_k + 1e-4);
+                raw_shift = std::clamp(raw_shift, -params_.ground_seeking_max_shift, params_.ground_seeking_max_shift);
+            }
+
+            // Virtual damping with touch-loss reset acceleration
+            double effective_alpha = params_.compliance_filter_alpha;
+            if (meas_torque < 0.35 * nom_torque) {
+                effective_alpha = params_.touch_loss_decay_alpha;
+            }
+
+            prev_compliance_shift_(i) = effective_alpha * raw_shift
+                                      + (1.0 - effective_alpha) * prev_compliance_shift_(i);
+
+            compliant_ecc_pos(i) = std::clamp(smoothed_ik(i) + prev_compliance_shift_(i),
+                                              params_.min_ecc_angle, params_.max_ecc_angle);
         }
-
-        // Virtual damping with touch-loss reset acceleration
-        double effective_alpha = params_.compliance_filter_alpha;
-        if (meas_torque < 0.35 * nom_torque) {
-            effective_alpha = params_.touch_loss_decay_alpha;
-        }
-
-        prev_compliance_shift_(i) = effective_alpha * raw_shift
-                                  + (1.0 - effective_alpha) * prev_compliance_shift_(i);
-
-        compliant_ecc_pos(i) = std::clamp(smoothed_ik(i) + prev_compliance_shift_(i),
-                                          params_.min_ecc_angle, params_.max_ecc_angle);
     }
 
     output.ecc_angles  = compliant_ecc_pos;

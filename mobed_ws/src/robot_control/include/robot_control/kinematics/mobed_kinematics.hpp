@@ -108,13 +108,54 @@ public:
     const MobedParameters& getParams() const { return params_; }
 
     /**
-     * @brief Get forbidden inward steering angle sector [min_angle, max_angle] for a leg
+     * @brief Structure defining forbidden inward steer sector
+     */
+    struct SteerForbiddenSector {
+        double center_angle; // Center angle in [-pi, pi]
+        double half_width;   // Half width in radians
+        bool active;         // True if sector is active
+    };
+
+    /**
+     * @brief Get forbidden inward steering angle sector parameters
      * 
      * @param leg_index Leg index (FL, FR, RL, RR)
-     * @param q_ecc Current eccentric posture angle (rad)
-     * @return std::pair<double, double> [min_angle, max_angle] in [-pi, pi]. If no collision, returns {0.0, 0.0}
+     * @return SteerForbiddenSector Sector info
      */
-    std::pair<double, double> getForbiddenSteerSector(int leg_index, double q_ecc) const;
+    SteerForbiddenSector getForbiddenSteerSectorInfo(int leg_index) const;
+
+    /**
+     * @brief Check if a steer angle is inside the forbidden under-belly sector
+     * 
+     * @param leg_index Leg index (FL, FR, RL, RR)
+     * @param steer_angle Steering angle in radians
+     * @param margin Safety buffer in radians (default 0.03 rad ~ 1.7 deg)
+     * @return true if inside forbidden sector
+     */
+    bool isSteerInForbiddenSector(int leg_index, double steer_angle, double margin = 0.03) const;
+
+    /**
+     * @brief Clamp/project an angle to the nearest boundary of the safe outward sector
+     * 
+     * @param leg_index Leg index (FL, FR, RL, RR)
+     * @param steer_angle Steering angle in radians
+     * @param margin Safety buffer in radians (default 0.03 rad ~ 1.7 deg)
+     * @return Clamped safe steering angle in [-pi, pi]
+     */
+    double clampToSafeSteerSector(int leg_index, double steer_angle, double margin = 0.03) const;
+
+    /**
+     * @brief Get the optimal outward wide-track stance angle for a leg
+     * 
+     * @param leg_index Leg index (FL, FR, RL, RR)
+     * @return Optimal angle in radians (FL/RR: +35 deg, FR/RL: -35 deg)
+     */
+    double getOptimalOutwardStanceAngle(int leg_index) const;
+
+    /**
+     * @brief Backward-compatible pair [min, max]
+     */
+    std::pair<double, double> getForbiddenSteerSector(int leg_index, double q_ecc = 0.0) const;
 
     /**
      * @brief Utility to normalize angle to [-pi, pi]

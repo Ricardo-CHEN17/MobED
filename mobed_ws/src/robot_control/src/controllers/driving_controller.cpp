@@ -37,10 +37,18 @@ double DrivingController::computeBankAngle(const Eigen::Vector3d& cmd_vel) const
 }
 
 std::pair<double, double> DrivingController::optimizeSwerveModule(
-    int leg_index, double des_steer, double des_speed, double curr_steer, double curr_ecc) const {
+    int leg_index, double des_steer, double des_speed, double curr_steer, double /*curr_ecc*/,
+    bool force_align) {
     
     if (std::abs(des_speed) < 1e-3) {
-        return {curr_steer, 0.0};
+        if (!force_align) {
+            return {curr_steer, 0.0};
+        }
+        // Force-alignment requested (homing or neutral centering):
+        // Steer directly towards des_steer, clamping outside forbidden sector
+        double s_target = kinematics_->normalize_angle(des_steer);
+        s_target = kinematics_->clampToSafeSteerSector(leg_index, s_target);
+        return {s_target, 0.0};
     }
 
     // Candidate State A: (des_steer, des_speed)
@@ -48,38 +56,91 @@ std::pair<double, double> DrivingController::optimizeSwerveModule(
     double v_A = des_speed;
 
     // Inverted State B: (des_steer +- pi, -des_speed)
-    // Exact physical equivalence: produces identical ground traction vector
+    // Produces identical ground traction vector while keeping wheel in outward safe sector
     double s_B = kinematics_->normalize_angle(des_steer + M_PI);
     double v_B = -des_speed;
 
-    // Query dynamic geometric forbidden inward sector from kinematics
-    auto [forbid_min, forbid_max] = kinematics_->getForbiddenSteerSector(leg_index, curr_ecc);
-    bool has_forbid = (forbid_min != forbid_max);
-
-    // Check collision safety for both states
-    bool safe_A = true;
-    bool safe_B = true;
-    if (has_forbid) {
-        safe_A = (s_A < forbid_min || s_A > forbid_max);
-        safe_B = (s_B < forbid_min || s_B > forbid_max);
-    }
+    // Query 166-degree under-belly forbidden sector
+    bool safe_A = !kinematics_->isSteerInForbiddenSector(leg_index, s_A);
+    bool safe_B = !kinematics_->isSteerInForbiddenSector(leg_index, s_B);
 
     double diff_A = std::abs(kinematics_->normalize_angle(s_A - curr_steer));
     double diff_B = std::abs(kinematics_->normalize_angle(s_B - curr_steer));
 
+    // Stance bias: slight preference for states closer to widest stance angle
+    double opt_stance = kinematics_->getOptimalOutwardStanceAngle(leg_index);
+    double stance_dist_A = std::abs(kinematics_->normalize_angle(s_A - opt_stance));
+    double stance_dist_B = std::abs(kinematics_->normalize_angle(s_B - opt_stance));
+
+    std::pair<double, double> result;
+
     if (safe_A && safe_B) {
-        // Both safe: choose shortest angular travel (|delta| <= 90 deg)
-        return (diff_A <= diff_B) ? std::make_pair(s_A, v_A) : std::make_pair(s_B, v_B);
+        // Both safe: apply switching hysteresis to prevent 100 Hz chattering near 90 deg
+        bool was_inverted = prev_swerve_inverted_[leg_index];
+        double hyst = params_.swerve_invert_hysteresis; // ~0.175 rad (10 deg)
+        
+        bool choose_B;
+        if (was_inverted) {
+            // Favor staying in B unless A is noticeably shorter
+            choose_B = (diff_A > diff_B - hyst);
+        } else {
+            // Favor staying in A unless B is noticeably shorter
+            choose_B = (diff_B < diff_A - hyst);
+        }
+
+        // If diffs are very close, break tie towards wider track stance
+        if (std::abs(diff_A - diff_B) < hyst) {
+            choose_B = (stance_dist_B < stance_dist_A);
+        }
+
+        if (choose_B) {
+            prev_swerve_inverted_[leg_index] = true;
+            result = {s_B, v_B};
+        } else {
+            prev_swerve_inverted_[leg_index] = false;
+            result = {s_A, v_A};
+        }
     } else if (safe_A) {
-        return {s_A, v_A};
+        prev_swerve_inverted_[leg_index] = false;
+        result = {s_A, v_A};
     } else if (safe_B) {
-        // Active evasion: flip 180 deg to free outward sector with 0% force loss
-        return {s_B, v_B};
+        // Active evasion: 180 deg inversion keeps wheel safely outward!
+        prev_swerve_inverted_[leg_index] = true;
+        result = {s_B, v_B};
     } else {
-        // Extremely rare double-restriction fallback: clamp to nearest boundary
-        double clamped_s = std::clamp(s_A, forbid_min, forbid_max);
-        return {clamped_s, 0.0};
+        // Edge case fallback: project A to nearest safe boundary outside forbidden sector
+        double safe_s = kinematics_->clampToSafeSteerSector(leg_index, s_A);
+        prev_swerve_inverted_[leg_index] = false;
+        result = {safe_s, 0.0};
     }
+
+    return result;
+}
+
+double DrivingController::enforceForbiddenSectorTransit(
+    int leg_index, double prev_s, double opt_s, double max_delta) const {
+
+    // 1. Ensure both boundary endpoints are outside the forbidden sector
+    opt_s  = kinematics_->clampToSafeSteerSector(leg_index, opt_s);
+    prev_s = kinematics_->clampToSafeSteerSector(leg_index, prev_s);
+
+    auto sector = kinematics_->getForbiddenSteerSectorInfo(leg_index);
+    double delta = kinematics_->normalize_angle(opt_s - prev_s);
+    double d_center = kinematics_->normalize_angle(sector.center_angle - prev_s);
+
+    // 2. Check if direct circular delta would travel through the forbidden center
+    if ((delta > 0.0 && d_center > 0.0 && d_center < delta) ||
+        (delta < 0.0 && d_center < 0.0 && d_center > delta)) {
+        // Reverse direction: step around the safe outward arc!
+        delta -= (delta > 0.0 ? 1.0 : -1.0) * (2.0 * M_PI);
+    }
+
+    // 3. Monotonic rate limiting
+    double step = std::clamp(delta, -max_delta, max_delta);
+    double next_s = kinematics_->normalize_angle(prev_s + step);
+
+    // 4. Guaranteed barrier defense: clamp to safe sector
+    return kinematics_->clampToSafeSteerSector(leg_index, next_s);
 }
 
 std::tuple<Eigen::Vector4d, Eigen::Vector4d> DrivingController::update(
@@ -113,9 +174,19 @@ std::tuple<Eigen::Vector4d, Eigen::Vector4d> DrivingController::update(
     }
 
     // ================================================================
+    // 0. Velocity Saturation Limits
+    // ================================================================
+    Eigen::Vector3d active_cmd = cmd_vel;
+    double v_planar = active_cmd.head<2>().norm();
+    if (v_planar > params_.max_linear_vel && v_planar > 1e-4) {
+        active_cmd.head<2>() *= (params_.max_linear_vel / v_planar);
+    }
+    active_cmd.z() = std::clamp(active_cmd.z(), -params_.max_angular_vel, params_.max_angular_vel);
+
+    // ================================================================
     // 1. Compute Bank Angle (centripetal force compensation)
     // ================================================================
-    double raw_bank = is_homing ? 0.0 : computeBankAngle(cmd_vel);
+    double raw_bank = is_homing ? 0.0 : computeBankAngle(active_cmd);
     // Low-pass filter for smooth transitions
     filtered_bank_angle_ += params_.bank_angle_filter * (raw_bank - filtered_bank_angle_);
 
@@ -129,7 +200,7 @@ std::tuple<Eigen::Vector4d, Eigen::Vector4d> DrivingController::update(
         raw_wheel_speeds.setZero();
         zero_cmd_duration_ = 0.0;
     } else {
-        if (cmd_vel.norm() < 1e-3) {
+        if (active_cmd.norm() < 1e-3) {
             zero_cmd_duration_ += dt;
         } else {
             zero_cmd_duration_ = 0.0;
@@ -137,7 +208,7 @@ std::tuple<Eigen::Vector4d, Eigen::Vector4d> DrivingController::update(
 
         // Use prev_steer_angles_ (last commanded) instead of current_steer_angles (physical)
         // Pass current_ecc_angles for exact contact point ^B r_i (Section III.D)
-        auto [s, w] = kinematics_->computeDrivingIK(cmd_vel, prev_steer_angles_, current_ecc_angles);
+        auto [s, w] = kinematics_->computeDrivingIK(active_cmd, prev_steer_angles_, current_ecc_angles);
         raw_steer_angles = s;
         raw_wheel_speeds = w;
 
@@ -154,10 +225,13 @@ std::tuple<Eigen::Vector4d, Eigen::Vector4d> DrivingController::update(
     Eigen::Vector4d opt_steer = prev_steer_angles_;
     Eigen::Vector4d opt_speed = prev_wheel_speeds_;
 
+    bool align_to_neutral = is_homing || (zero_cmd_duration_ > 0.3);
+
     for (int i = 0; i < 4; ++i) {
         auto [s, w] = optimizeSwerveModule(
             i, raw_steer_angles(i), raw_wheel_speeds(i),
-            prev_steer_angles_(i), current_ecc_angles(i));
+            prev_steer_angles_(i), current_ecc_angles(i),
+            align_to_neutral);
         opt_steer(i) = s;
         opt_speed(i) = w;
     }
@@ -192,13 +266,13 @@ std::tuple<Eigen::Vector4d, Eigen::Vector4d> DrivingController::update(
         double speed_delta = target_speed - prev_wheel_speeds_(i);
         double max_speed_delta = params_.max_wheel_accel * dt;
         speed_delta = std::clamp(speed_delta, -max_speed_delta, max_speed_delta);
-        final_speed(i) = prev_wheel_speeds_(i) + speed_delta;
+        double sat_speed = prev_wheel_speeds_(i) + speed_delta;
+        final_speed(i) = std::clamp(sat_speed, -params_.max_wheel_speed, params_.max_wheel_speed);
 
-        // Rate Limiting (Steering) with shortest-path angular normalization
-        double steer_delta = kinematics_->normalize_angle(opt_steer(i) - prev_steer_angles_(i));
+        // Rate Limiting (Steering) with continuous forbidden sector avoidance
         double max_steer_delta = params_.max_steer_vel * dt;
-        steer_delta = std::clamp(steer_delta, -max_steer_delta, max_steer_delta);
-        final_steer(i) = kinematics_->normalize_angle(prev_steer_angles_(i) + steer_delta);
+        final_steer(i) = enforceForbiddenSectorTransit(
+            i, prev_steer_angles_(i), opt_steer(i), max_steer_delta);
     }
 
     // ============================================================

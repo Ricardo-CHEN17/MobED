@@ -51,6 +51,11 @@ struct TaskControllerParams {
     double settling_duration = 1.50;     // s (max settling duration guard)
     double blend_out_duration = 0.40;    // s
     double cooldown_duration = 1.0;      // s
+
+    // Active pitch leveling during straddle
+    double leveling_kp_pitch = 2.5;
+    double leveling_kd_pitch = 0.3;
+    double max_straddle_time_200mm = 8.0; // s
 };
 
 class TaskController {
@@ -87,21 +92,10 @@ public:
     }
     double getCurbHeight() const { return params_.target_curb_height; }
 
-    void setModeProfile(ClimbMode mode) {
+    void setClimbMode(ClimbMode mode) {
         params_.climb_mode = mode;
-        if (mode == ClimbMode::HIGH_200MM) {
-            params_.target_curb_height = 0.20;
-            params_.front_roll_speed = 2.5;
-            params_.rear_roll_speed = 2.5;
-            params_.forward_drive_speed = 0.20;
-        } else {
-            params_.target_curb_height = 0.08;
-            params_.front_roll_speed = 2.5;
-            params_.rear_roll_speed = 2.5;
-            params_.forward_drive_speed = 0.20;
-        }
     }
-    ClimbMode getModeProfile() const { return params_.climb_mode; }
+    ClimbMode getClimbMode() const { return params_.climb_mode; }
 
     /**
      * @brief Continuous analytical front target angle mapping (1.45 rad for 40mm up to 2.60 rad for 200mm).

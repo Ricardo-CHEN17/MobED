@@ -18,6 +18,8 @@ struct DrivingControllerParams {
     bool enable_coherent_drive_scaling = true;
     // Maximum steer alignment deadband for full drive power (rad, ~4.5 deg)
     double steer_alignment_deadband = 0.08;
+    // Switching hysteresis to prevent 100 Hz chattering near 90 deg inversion boundaries (rad, ~10 deg)
+    double swerve_invert_hysteresis = 0.175;
 
     // ---- Bank Angle Calculator (Eq 8 in paper) ----
     // Maximum allowable bank angle (roll induced by centripetal force)
@@ -35,6 +37,11 @@ struct DrivingControllerParams {
     double ki_wheel = 0.5;          // Nm/rad (wheel speed PI integral gain)
     double max_steer_torque = 35.0; // Nm (steering actuator saturation limit)
     double max_wheel_torque = 25.0; // Nm (driving wheel traction saturation limit)
+
+    // ---- Velocity & Speed Saturation Limits ----
+    double max_linear_vel  = 1.2;   // m/s (maximum chassis planar translation speed)
+    double max_angular_vel = 2.0;   // rad/s (maximum chassis yaw rotation rate)
+    double max_wheel_speed = 15.0;  // rad/s (~1.5 m/s maximum wheel rotational speed)
 };
 
 class DrivingController {
@@ -107,6 +114,7 @@ public:
         initialized_ = false;
         filtered_bank_angle_ = 0.0;
         zero_cmd_duration_ = 0.0;
+        prev_swerve_inverted_.fill(false);
         steer_torques_.setZero();
         wheel_torques_.setZero();
         wheel_speed_integrals_.setZero();
@@ -127,6 +135,7 @@ private:
     bool initialized_ = false;
     double filtered_bank_angle_ = 0.0;  // smoothed bank angle output
     double zero_cmd_duration_ = 0.0;    // duration in seconds for which cmd_vel has been ~0
+    std::array<bool, 4> prev_swerve_inverted_ = {false, false, false, false};
 
     /**
      * @brief Two-Stage Swerve Optimization with 180-deg Wheel Inversion Escape
@@ -142,7 +151,15 @@ private:
      * @return std::pair<double, double> Optimized (steer_angle, wheel_speed)
      */
     std::pair<double, double> optimizeSwerveModule(
-        int leg_index, double des_steer, double des_speed, double curr_steer, double curr_ecc) const;
+        int leg_index, double des_steer, double des_speed, double curr_steer, double curr_ecc,
+        bool force_align = false);
+
+    /**
+     * @brief Dynamic collision-free transit interpolator.
+     * Guarantees intermediate angles during slew rate limiting NEVER enter the forbidden sector.
+     */
+    double enforceForbiddenSectorTransit(
+        int leg_index, double prev_s, double opt_s, double max_delta) const;
 };
 
 }  // namespace controllers

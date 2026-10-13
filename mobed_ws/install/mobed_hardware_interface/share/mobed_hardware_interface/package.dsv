@@ -4,6 +4,3 @@ source;share/mobed_hardware_interface/hook/pythonpath.sh
 source;share/mobed_hardware_interface/hook/ament_prefix_path.ps1
 source;share/mobed_hardware_interface/hook/ament_prefix_path.dsv
 source;share/mobed_hardware_interface/hook/ament_prefix_path.sh
-source;../../build/mobed_hardware_interface/share/mobed_hardware_interface/hook/pythonpath_develop.ps1
-source;../../build/mobed_hardware_interface/share/mobed_hardware_interface/hook/pythonpath_develop.dsv
-source;../../build/mobed_hardware_interface/share/mobed_hardware_interface/hook/pythonpath_develop.sh
