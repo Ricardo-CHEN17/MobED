@@ -47,6 +47,7 @@ public:
         driving_controller_  = std::make_unique<controllers::DrivingController>(drive_params, kinematics_);
         balance_controller_  = std::make_unique<controllers::BalanceController>(balance_params, kinematics_);
         state_estimator_     = std::make_unique<estimation::StateEstimator>(robot_params_);
+        state_estimator_->startStaticCalibration(200);
         terrain_estimator_   = std::make_unique<estimation::TerrainEstimator>(robot_params_);
         contact_detector_    = std::make_unique<estimation::ContactDetector>(robot_params_);
         climb_geometry_estimator_ = std::make_unique<estimation::ClimbGeometryEstimator>(robot_params_);
@@ -285,34 +286,34 @@ private:
 
             // ---- Eccentric joints: position + velocity + effort ----
             else if (name == "Posture_control_joint_LF") {
-                double q = (pos - ecc_offsets_[0]) * ecc_signs_[0];
-                while (q >  M_PI) q -= 2.0 * M_PI;
-                while (q <= -M_PI) q += 2.0 * M_PI;
-                curr_ecc_angles_(0) = q;
+                double raw_q = (pos - ecc_offsets_[0]) * ecc_signs_[0];
+                while (raw_q > M_PI) raw_q -= 2.0 * M_PI;
+                while (raw_q <= -M_PI) raw_q += 2.0 * M_PI;
+                curr_ecc_angles_(0) = raw_q;
                 curr_ecc_velocities_(0) = vel * ecc_signs_[0];
                 curr_ecc_efforts_(0) = effort;
             }
             else if (name == "Posture_control_joint_RF") {
-                double q = (pos - ecc_offsets_[1]) * ecc_signs_[1];
-                while (q >  M_PI) q -= 2.0 * M_PI;
-                while (q <= -M_PI) q += 2.0 * M_PI;
-                curr_ecc_angles_(1) = q;
+                double raw_q = (pos - ecc_offsets_[1]) * ecc_signs_[1];
+                while (raw_q > M_PI) raw_q -= 2.0 * M_PI;
+                while (raw_q <= -M_PI) raw_q += 2.0 * M_PI;
+                curr_ecc_angles_(1) = raw_q;
                 curr_ecc_velocities_(1) = vel * ecc_signs_[1];
                 curr_ecc_efforts_(1) = effort;
             }
             else if (name == "Posture_control_joint_LB") {
-                double q = (pos - ecc_offsets_[2]) * ecc_signs_[2];
-                while (q >  M_PI) q -= 2.0 * M_PI;
-                while (q <= -M_PI) q += 2.0 * M_PI;
-                curr_ecc_angles_(2) = q;
+                double raw_q = (pos - ecc_offsets_[2]) * ecc_signs_[2];
+                while (raw_q > M_PI) raw_q -= 2.0 * M_PI;
+                while (raw_q <= -M_PI) raw_q += 2.0 * M_PI;
+                curr_ecc_angles_(2) = raw_q;
                 curr_ecc_velocities_(2) = vel * ecc_signs_[2];
                 curr_ecc_efforts_(2) = effort;
             }
             else if (name == "Posture_control_joint_RB") {
-                double q = (pos - ecc_offsets_[3]) * ecc_signs_[3];
-                while (q >  M_PI) q -= 2.0 * M_PI;
-                while (q <= -M_PI) q += 2.0 * M_PI;
-                curr_ecc_angles_(3) = q;
+                double raw_q = (pos - ecc_offsets_[3]) * ecc_signs_[3];
+                while (raw_q > M_PI) raw_q -= 2.0 * M_PI;
+                while (raw_q <= -M_PI) raw_q += 2.0 * M_PI;
+                curr_ecc_angles_(3) = raw_q;
                 curr_ecc_velocities_(3) = vel * ecc_signs_[3];
                 curr_ecc_efforts_(3) = effort;
             }
@@ -336,13 +337,6 @@ private:
             }
         }
 
-        // Resync CAD tracking array on initial startup or when simulation teleports/resets keyframe (> 0.6 rad delta)
-        for (int i = 0; i < 4; ++i) {
-            double current_cad = curr_ecc_angles_(i) * ecc_signs_[i] + ecc_offsets_[i];
-            if (!joints_initialized_ || std::abs(current_cad - prev_cad_ecc_[i]) > 0.6) {
-                prev_cad_ecc_[i] = current_cad;
-            }
-        }
         joints_initialized_ = true;
     }
 
@@ -357,6 +351,12 @@ private:
             high_stair_controller_->abort();
             task_controller_->reset();
             contact_detector_->reset();
+            climb_geometry_estimator_->reset();
+            terrain_estimator_->reset();
+            state_estimator_->reset();
+            for (int i = 0; i < 4; ++i) {
+                prev_cad_ecc_[i] = curr_ecc_angles_(i) * ecc_signs_[i] + ecc_offsets_[i];
+            }
         }
     }
 
@@ -378,6 +378,15 @@ private:
         // ============================================================
         if (is_homing_) {
             homing_timer_ += dt;
+            if (imu_received_ && !state_estimator_->isCalibrated()) {
+                if (state_estimator_->updateStaticCalibration(latest_imu_)) {
+                    auto b_a = state_estimator_->getAccelBias();
+                    auto b_g = state_estimator_->getGyroBias();
+                    RCLCPP_INFO(this->get_logger(),
+                        "Static IMU calibration complete! Accel bias: [%.3f, %.3f, %.3f] m/s^2, Gyro bias: [%.4f, %.4f, %.4f] rad/s",
+                        b_a.x(), b_a.y(), b_a.z(), b_g.x(), b_g.y(), b_g.z());
+                }
+            }
             if (homing_timer_ > HOMING_DURATION) {
                 is_homing_ = false;
                 RCLCPP_INFO(this->get_logger(), "Homing complete. Full control pipeline active.");
@@ -434,11 +443,13 @@ private:
             contact_points_world[i] = base_pos + R_base * foot_pos_in_base[i];
         }
 
-        // Update climb geometry estimator (step height, pitch, support margins)
+        // Update climb geometry estimator (step height, standardized pitch, support margins)
         climb_geometry_estimator_->update(
             body_state, contact_points_world,
+            curr_ecc_angles_,
             curr_wheel_velocities_, curr_wheel_efforts_,
-            prev_target_wheel_, dt);
+            prev_target_wheel_, omega_body,
+            task_controller_->getCurbHeight(), dt);
 
         Eigen::Vector3d active_cmd_vel = is_homing_ ? Eigen::Vector3d::Zero() : cmd_vel_;
         if (task_controller_->isActive()) {
@@ -455,14 +466,15 @@ private:
         TerrainState terrain_state = terrain_estimator_->getState();
 
         // ============================================================
-        // Phase 3: Contact Detection (Multi-Modal: Torque + Wheel Stall + Chassis Blocked)
+        // Phase 3: Contact Detection (Multi-Modal: Torque + Wheel Stall + Chassis Blocked + Wall Roll)
         // ============================================================
         Eigen::Vector3d v_body = R_base.transpose() * body_state.linear_velocity;
         double chassis_forward_vel = v_body.x();
 
         contact_detector_->update(
             curr_ecc_efforts_, curr_wheel_efforts_, curr_wheel_velocities_,
-            chassis_forward_vel, active_cmd_vel.x(), dt);
+            chassis_forward_vel, active_cmd_vel.x(),
+            climb_geometry_estimator_->getGeometry(), dt);
 
         // ============================================================
         // Phase 4: FSM Task Controller (climbing state machine)
@@ -486,17 +498,15 @@ private:
 
             bool wheels_rolling_forward = (curr_wheel_velocities_(0) > 1.0) &&
                                           (curr_wheel_velocities_(1) > 1.0);
-            double pitch_curr = body_state.pitch();
-            double pitch_rate = body_state.angular_velocity.y();
+            const auto& geom = climb_geometry_estimator_->getGeometry();
             bool transient_ramp = (cmd_vel_(0) > 0.05) && wheels_rolling_forward &&
-                                  ((pitch_curr > robot_params_.ramp_inhibit_pitch_threshold) ||
-                                   (pitch_rate > robot_params_.ramp_inhibit_pitch_rate_threshold));
+                                  (geom.nose_up_pitch > robot_params_.ramp_inhibit_pitch_threshold);
 
             bool is_on_ramp = !front_wheel_stalled && (steady_ramp || transient_ramp);
 
             bool obstacle_climb_permitted = forward_straight_active;
-            // Only inhibit on mild cruising ramps when target curb height is very low (< 50mm) and in LOW mode
-            if (climb_mode_ == ClimbMode::LOW_80MM && task_controller_->getCurbHeight() < 0.05 && is_on_ramp) {
+            // Inhibit obstacle climbing when driving on steady or transient ramps without front wheel stall
+            if (is_on_ramp) {
                 obstacle_climb_permitted = false;
             }
 
@@ -504,7 +514,7 @@ private:
                 contact_detector_->reset();
             }
             task_controller_->update(
-                *contact_detector_, curr_ecc_angles_, curr_ecc_efforts_, dt, chassis_forward_vel);
+                *contact_detector_, geom, curr_ecc_angles_, curr_ecc_efforts_, dt, chassis_forward_vel);
         }
 
         // Log FSM state transitions with override mask info
@@ -549,29 +559,36 @@ private:
             balance_out.ecc_angles = target_ecc;
         } else {
             // Mode 1: Nominal balanced cruising & 80mm obstacle crossing (37 deg outward stance)
-            double active_height = is_homing_ ? 0.205 : target_height_;
-            double active_roll   = is_homing_ ? 0.0 : target_roll_;
-            double active_pitch  = is_homing_ ? 0.0 : target_pitch_;
+            // Once climbed onto 100mm curb, hold the plateau stance [2.80, 2.80, -2.80, -2.80]
+            if (task_controller_->hasClimbed()) {
+                target_ecc << 2.80, 2.80, -2.80, -2.80;
+                balance_out.ecc_torques.setZero();
+                balance_out.ecc_angles = target_ecc;
+            } else {
+                double active_height = is_homing_ ? 0.205 : target_height_;
+                double active_roll   = is_homing_ ? 0.0 : target_roll_;
+                double active_pitch  = is_homing_ ? 0.0 : target_pitch_;
 
-            // Overlay bank angle from driving controller onto target roll
-            active_roll += driving_controller_->getBankAngle();
+                // Overlay bank angle from driving controller onto target roll
+                active_roll += driving_controller_->getBankAngle();
 
-            // Prepare terrain state for BalanceController:
-            // When climbing an obstacle, zero out longitudinal pitch slope compensation
-            TerrainState active_terrain_state = terrain_state;
-            if (task_controller_->isActive()) {
-                active_terrain_state.pitch_slope = 0.0;
-                active_terrain_state.rotation = Eigen::AngleAxisd(
-                    active_terrain_state.roll_slope, Eigen::Vector3d::UnitX()).toRotationMatrix();
+                // Prepare terrain state for BalanceController:
+                // When climbing an obstacle, zero out longitudinal pitch slope compensation
+                TerrainState active_terrain_state = terrain_state;
+                if (task_controller_->isActive()) {
+                    active_terrain_state.pitch_slope = 0.0;
+                    active_terrain_state.rotation = Eigen::AngleAxisd(
+                        active_terrain_state.roll_slope, Eigen::Vector3d::UnitX()).toRotationMatrix();
+                }
+
+                // Call updateHybrid using contact points from Phase 2.5 and body_state from Phase 2
+                balance_out = balance_controller_->updateHybrid(
+                    active_height, active_roll, active_pitch,
+                    target_steer, curr_ecc_angles_, curr_ecc_efforts_, body_state,
+                    contact_points_world, contact_valid, active_terrain_state, dt, e_stop_active_, active_cmd_vel);
+
+                target_ecc = balance_out.ecc_angles;
             }
-
-            // Call updateHybrid using contact points from Phase 2.5 and body_state from Phase 2
-            balance_out = balance_controller_->updateHybrid(
-                active_height, active_roll, active_pitch,
-                target_steer, curr_ecc_angles_, curr_ecc_efforts_, body_state,
-                contact_points_world, contact_valid, active_terrain_state, dt, e_stop_active_, active_cmd_vel);
-
-            target_ecc = balance_out.ecc_angles;
         }
 
         // ============================================================
@@ -634,20 +651,11 @@ private:
             // 1. Convert math-frame target to raw CAD frame
             double raw_cad = target_ecc(i) * ecc_signs_[i] + ecc_offsets_[i];
 
-            // 2. Blend-out lerp: when FSM just finished (IDLE + blend_w > 0),
-            //    interpolate between the last FSM override angle and the IK angle.
-            //    This prevents the chassis from slamming down immediately after climbing.
-            if (blend_w > 0.0 && ecc_override_mask[i]) {
-                double fsm_cad = ecc_overrides_vec(i) * ecc_signs_[i] + ecc_offsets_[i];
-                raw_cad = blend_w * fsm_cad + (1.0 - blend_w) * raw_cad;
-            }
-
-            // 3. Continuous angle Unwrap (shortest-arc delta from previous command).
-            //    This replaces the old `while (cad > π) cad -= 2π` modulo that
-            //    caused 360° instantaneous jumps and servo motor runaway.
-            double delta = std::atan2(std::sin(raw_cad - prev_cad_ecc_[i]),
-                                      std::cos(raw_cad - prev_cad_ecc_[i]));
-            double safe_cad = prev_cad_ecc_[i] + delta;
+            // 2. Shortest-arc tracking from current measured joint position
+            double curr_cad = curr_ecc_angles_(i) * ecc_signs_[i] + ecc_offsets_[i];
+            double delta = std::atan2(std::sin(raw_cad - curr_cad),
+                                      std::cos(raw_cad - curr_cad));
+            double safe_cad = curr_cad + delta;
             prev_cad_ecc_[i] = safe_cad;
 
             cmd_msg.position.push_back(safe_cad);

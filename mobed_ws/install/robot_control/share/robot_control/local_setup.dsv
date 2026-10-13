@@ -1,3 +1,1 @@
-source;share/robot_control/environment/ament_prefix_path.sh
-source;share/robot_control/environment/library_path.sh
-source;share/robot_control/environment/path.sh
+/workspace/mobed_ws/build/robot_control/ament_cmake_environment_hooks/local_setup.dsv

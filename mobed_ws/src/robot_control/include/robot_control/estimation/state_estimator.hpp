@@ -62,16 +62,30 @@ public:
     Eigen::Vector3d getImuLeverArm() const { return imu_lever_arm_; }
 
     /**
+     * @brief Start static calibration (sample IMU while stationary).
+     * @param target_samples Number of samples to average (default 200 = 2.0s at 100Hz)
+     */
+    void startStaticCalibration(int target_samples = 200);
+
+    /**
+     * @brief Feed IMU data during static calibration.
+     * @return true when calibration is complete
+     */
+    bool updateStaticCalibration(const ImuData& imu);
+
+    bool isCalibrated() const { return is_calibrated_; }
+
+    /**
      * @brief Get the current estimated body state.
      * @return BodyState with position, orientation, linear and angular velocity.
      */
     BodyState getState() const;
 
     /**
-     * @brief Get the estimated accelerometer and gyroscope biases.
+     * @brief Get the static calibrated accelerometer and gyroscope biases.
      */
-    Eigen::Vector3d getAccelBias() const { return x_.segment<3>(9); }
-    Eigen::Vector3d getGyroBias()  const { return x_.segment<3>(12); }
+    Eigen::Vector3d getAccelBias() const { return static_accel_bias_; }
+    Eigen::Vector3d getGyroBias()  const { return static_gyro_bias_; }
 
     /**
      * @brief Reset the estimator to initial conditions.
@@ -87,9 +101,19 @@ private:
     RobotParams params_;
     bool initialized_ = false;
 
-    // ---- EKF State ----
-    // State: [px, py, pz, vx, vy, vz, droll, dpitch, dyaw, bax, bay, baz, bgx, bgy, bgz]
-    static constexpr int STATE_DIM = 15;
+    // ---- Static Calibration ----
+    bool is_calibrated_ = false;
+    bool calibrating_ = false;
+    int calib_target_samples_ = 200;
+    int calib_sample_count_ = 0;
+    Eigen::Vector3d calib_accel_sum_ = Eigen::Vector3d::Zero();
+    Eigen::Vector3d calib_gyro_sum_  = Eigen::Vector3d::Zero();
+    Eigen::Vector3d static_accel_bias_ = Eigen::Vector3d::Zero();
+    Eigen::Vector3d static_gyro_bias_  = Eigen::Vector3d::Zero();
+
+    // ---- EKF State (9-Dimensional) ----
+    // State: [px, py, pz, vx, vy, vz, droll, dpitch, dyaw]
+    static constexpr int STATE_DIM = 9;
     Eigen::Matrix<double, STATE_DIM, 1> x_;        // state vector
     Eigen::Matrix<double, STATE_DIM, STATE_DIM> P_; // state covariance
 
@@ -107,7 +131,7 @@ private:
     /**
      * @brief Build the state transition Jacobian F for the prediction step.
      * @param dt Time step
-     * @return 15x15 Jacobian matrix
+     * @return 9x9 Jacobian matrix
      */
     Eigen::Matrix<double, STATE_DIM, STATE_DIM> computeF(double dt) const;
 };

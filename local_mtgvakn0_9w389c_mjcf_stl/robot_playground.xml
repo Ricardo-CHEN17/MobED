@@ -195,7 +195,6 @@
           <joint name="Posture_control_joint_LF" type="hinge" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-200 200" actuatorfrclimited="true" />
           <inertial pos="-0.035491101 -0.01210916 -0.013991309" mass="1.061999" quat="0.98651643 0 0 0.16366223" diaginertia="0.00008364 0.00087668 0.00094262" />
           <geom name="Posture_control_joint_LF_mesh_1" type="mesh" mesh="part_003_solid_003" pos="0.15190479 -0.037811066 0.18697595" euler="1.5707963 0 -3.1415927" group="1" contype="0" conaffinity="0" />
-          <geom name="ecc_arm_col_LF" type="capsule" fromto="0 0 0 -0.071 -0.024 -0.019" size="0.02" contype="1" conaffinity="1" friction="0.8 0.005 0.0001" group="0" rgba="0.8 0.4 0.2 0.5" />
           <body name="Wheel_joint_LF" pos="-0.070982202 -0.02421832 -0.018991302" euler="3.1415927 0 0">
             <joint name="Wheel_joint_LF" type="hinge" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-200 200" actuatorfrclimited="true" />
             <inertial pos="1.2736975e-10 0 0.010000008" mass="0.75153473" quat="0.99861458 0 0 0.052620487" diaginertia="0.0018977931 0.001897793 0.0037454838" />
@@ -212,7 +211,6 @@
           <joint name="Posture_control_joint_RF" type="hinge" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-200 200" actuatorfrclimited="true" />
           <inertial pos="0.0033361432 0.037351307 -7.573517e-09" mass="1.061999" quat="0.99900822 0 0 -0.044526062" diaginertia="0.00087668 0.00008364 0.00094262" />
           <geom name="Posture_control_joint_RF_mesh_1" type="mesh" mesh="part_010_solid_010" pos="0.15190479 0.037811066 0.21915469" euler="-1.5707963 0 -3.1415927" group="1" contype="0" conaffinity="0" />
-          <geom name="ecc_arm_col_RF" type="capsule" fromto="0 0 0 0.007 0.075 -0.005" size="0.02" contype="1" conaffinity="1" friction="0.8 0.005 0.0001" group="0" rgba="0.2 0.8 0.4 0.5" />
           <body name="Wheel_joint_RF" pos="0.0066722838 0.074702615 -0.005" euler="-3.1415927 0 0">
             <joint name="Wheel_joint_RF" type="hinge" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-200 200" actuatorfrclimited="true" />
             <inertial pos="-9.5305775e-10 -3.2682827e-10 0.010000008" mass="0.75153475" quat="0.93536482 0 0 -0.3536844" diaginertia="0.0018977931 0.0018977931 0.003745484" />
@@ -229,7 +227,6 @@
           <joint name="Posture_control_joint_LB" type="hinge" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-200 200" actuatorfrclimited="true" />
           <inertial pos="0.037472079 0.0014468008 -7.5886705e-09" mass="1.061999" quat="0.99981385 0 0 0.019294275" diaginertia="0.00008364 0.00087668 0.00094262" />
           <geom name="Posture_control_joint_LB_mesh_1" type="mesh" mesh="part_008_solid_008" pos="-0.14809521 -0.037811066 0.20096725" euler="1.5707963 0 -3.1415927" group="1" contype="0" conaffinity="0" />
-          <geom name="ecc_arm_col_LB" type="capsule" fromto="0 0 0 0.075 0.003 -0.005" size="0.02" contype="1" conaffinity="1" friction="0.8 0.005 0.0001" group="0" rgba="0.8 0.4 0.8 0.5" />
           <body name="Wheel_joint_LB" pos="0.07494416 0.0028936022 -0.005" euler="3.1415927 0 0">
             <joint name="Wheel_joint_LB" type="hinge" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-200 200" actuatorfrclimited="true" />
             <inertial pos="0 4.5386143e-10 0.010000008" mass="0.75153474" quat="0.93171755 0 0 -0.36318371" diaginertia="0.0018977931 0.001897793 0.0037454838" />
@@ -246,7 +243,6 @@
           <joint name="Posture_control_joint_RB" type="hinge" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-200 200" actuatorfrclimited="true" />
           <inertial pos="0.0035230026 0.037334146 -7.5735161e-09" mass="1.061999" quat="0.99889369 0 0 -0.047025398" diaginertia="0.00087668 0.00008364 0.00094262" />
           <geom name="Posture_control_joint_RB_mesh_1" type="mesh" mesh="part_009_solid_009" pos="-0.14809521 0.037811066 0.21915469" euler="-1.5707963 0 -3.1415927" group="1" contype="0" conaffinity="0" />
-          <geom name="ecc_arm_col_RB" type="capsule" fromto="0 0 0 0.007 0.075 -0.005" size="0.02" contype="1" conaffinity="1" friction="0.8 0.005 0.0001" group="0" rgba="0.2 0.4 0.8 0.5" />
           <body name="Wheel_joint_RB" pos="0.0070460026 0.074668292 -0.005" euler="-3.1415927 0 0">
             <joint name="Wheel_joint_RB" type="hinge" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-200 200" actuatorfrclimited="true" />
             <inertial pos="-1.2465447e-09 -5.7382597e-10 0.010000008" mass="0.75153475" quat="0.99454652 0 0 -0.10429394" diaginertia="0.0018977932 0.0018977931 0.003745484" />
@@ -275,4 +271,18 @@
     <velocity name="act_wheel_RL" joint="Wheel_joint_LB" kv="10" ctrllimited="true" ctrlrange="-50 50" />
     <velocity name="act_wheel_RR" joint="Wheel_joint_RB" kv="10" ctrllimited="true" ctrlrange="-50 50" />
   </actuator>
+  <contact>
+    <exclude body1="chassis" body2="Wheel_joint_LF" />
+    <exclude body1="chassis" body2="Wheel_joint_RF" />
+    <exclude body1="chassis" body2="Wheel_joint_LB" />
+    <exclude body1="chassis" body2="Wheel_joint_RB" />
+    <exclude body1="chassis" body2="Posture_control_joint_LF" />
+    <exclude body1="chassis" body2="Posture_control_joint_RF" />
+    <exclude body1="chassis" body2="Posture_control_joint_LB" />
+    <exclude body1="chassis" body2="Posture_control_joint_RB" />
+    <exclude body1="chassis" body2="Steering_joint_LF" />
+    <exclude body1="chassis" body2="Steering_joint_RF" />
+    <exclude body1="chassis" body2="Steering_joint_LB" />
+    <exclude body1="chassis" body2="Steering_joint_RB" />
+  </contact>
 </mujoco>

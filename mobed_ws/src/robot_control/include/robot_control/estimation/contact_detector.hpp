@@ -5,23 +5,13 @@
 #include <deque>
 #include "robot_control/core/mobed_types.hpp"
 #include "robot_control/core/robot_params.hpp"
+#include "robot_control/estimation/climb_geometry_estimator.hpp"
 
 namespace robot_control {
 namespace estimation {
 
 /**
- * @brief Contact and impact detector using joint torque feedback.
- *
- * Monitors the eccentric joint and wheel joint effort (torque) signals
- * to detect sudden impacts — specifically, the moment a wheel collides
- * with a stair or curb edge. Detection is based on two complementary
- * methods:
- *
- * 1. Absolute threshold: |τ| > τ_threshold
- * 2. Rate-of-change threshold: |dτ/dt| > τ_rate_threshold
- *
- * A sliding window is used to compute a smoothed torque derivative,
- * filtering out sensor noise while preserving sharp impact transients.
+ * @brief Contact and impact detector using joint torque and climbing geometry feedback.
  */
 class ContactDetector {
 public:
@@ -29,26 +19,32 @@ public:
     virtual ~ContactDetector() = default;
 
     /**
-     * @brief Feed new joint effort data and update detection state.
-     *
-     * Should be called at the control loop rate (e.g., 100 Hz).
-     *
-     * @param ecc_efforts   Eccentric joint torques [FL, FR, RL, RR] (Nm)
-     * @param wheel_efforts Wheel joint torques [FL, FR, RL, RR] (Nm)
-     * @param dt            Time step since last call (seconds)
+     * @brief Feed new joint effort data and geometric state to update detection.
      */
     void update(const Eigen::Vector4d& ecc_efforts,
                 const Eigen::Vector4d& wheel_efforts,
                 const Eigen::Vector4d& wheel_velocities,
                 double chassis_forward_vel,
                 double cmd_forward_vel,
+                const ClimbGeometry& geometry,
                 double dt);
 
     void update(const Eigen::Vector4d& ecc_efforts,
                 const Eigen::Vector4d& wheel_efforts,
                 const Eigen::Vector4d& wheel_velocities,
+                double chassis_forward_vel,
+                double cmd_forward_vel,
                 double dt) {
-        update(ecc_efforts, wheel_efforts, wheel_velocities, 0.0, 0.2, dt);
+        ClimbGeometry dummy;
+        update(ecc_efforts, wheel_efforts, wheel_velocities, chassis_forward_vel, cmd_forward_vel, dummy, dt);
+    }
+
+    void update(const Eigen::Vector4d& ecc_efforts,
+                const Eigen::Vector4d& wheel_efforts,
+                const Eigen::Vector4d& wheel_velocities,
+                double dt) {
+        ClimbGeometry dummy;
+        update(ecc_efforts, wheel_efforts, wheel_velocities, 0.0, 0.2, dummy, dt);
     }
 
     /**
@@ -93,6 +89,7 @@ private:
     // Two-stage detection timers per leg
     std::array<double, NUM_LEGS> shock_window_timer_;
     std::array<double, NUM_LEGS> sustain_timer_;
+    double startup_timer_ = 0.0;
 
     // Sliding window history for torque derivative computation
     static constexpr int WINDOW_SIZE = 5;

@@ -1,1 +1,1 @@
-/workspace/mobed_ws/install/robot_control:/workspace/mobed_ws/install/mobed_teleop:/workspace/mobed_ws/install/robot_interfaces:/workspace/mobed_ws/install/robot_bringup:/workspace/mobed_ws/install/mobed_hardware_interface:/workspace/mobed_ws/install/mobed_bridge:/opt/ros/humble
+/workspace/mobed_ws/build/robot_control/ament_cmake_index/share/ament_index/resource_index/parent_prefix_path/robot_control

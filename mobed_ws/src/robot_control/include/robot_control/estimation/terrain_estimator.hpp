@@ -66,6 +66,7 @@ private:
     double filter_alpha_ = 0.30;        // LPF smoothing coefficient for normal vector (tau ≈ 67ms)
     double max_slope_angle_ = 0.35;     // rad (~20 deg), maximum allowed terrain slope angle
     Eigen::Vector3d gravity_normal_prev_ = Eigen::Vector3d(0.0, 0.0, 1.0);
+    bool in_non_planar_zone_ = false;   // Hysteresis state for micro-bump rejection
 
     /**
      * @brief Fit a plane to a set of 3D points using SVD.

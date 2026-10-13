@@ -93,6 +93,8 @@ class UdpInterfaceNode(Node):
 
         name_to_canonical_idx = {name: i for i, name in enumerate(JOINT_NAMES)}
         commands = [0.0] * 12
+        torques = [0.0] * 12
+        has_effort = (len(msg.effort) == len(msg.name))
 
         for i, name in enumerate(msg.name):
             canonical_idx = name_to_canonical_idx.get(name)
@@ -102,8 +104,14 @@ class UdpInterfaceNode(Node):
                 commands[canonical_idx] = msg.velocity[i]
             else:
                 commands[canonical_idx] = msg.position[i]
+            if has_effort:
+                torques[canonical_idx] = msg.effort[i]
 
-        packet = json.dumps({'cmd': commands}).encode('utf-8')
+        payload = {'cmd': commands}
+        if has_effort:
+            payload['torque'] = torques
+
+        packet = json.dumps(payload).encode('utf-8')
         try:
             self.sock.sendto(packet, self.mac_addr)
         except OSError as e:

@@ -79,7 +79,7 @@ struct RobotParams {
     // -----------------------------------------------
     // Contact Detection Parameters (Multi-Modal Model)
     // -----------------------------------------------
-    double contact_torque_threshold      = 2.0;    // Nm, sustained effort load for obstacle collision confirmation (Mode 1 curb ~2.4Nm, Mode 2 wall ~7.8Nm, flat <0.8Nm)
+    double contact_torque_threshold      = 4.2;    // Nm, sustained effort load for obstacle collision confirmation (gravity load on flat is 2.2~2.6 Nm; true obstacle collision is >4.5 Nm)
     double contact_torque_rate_threshold = 25.0;   // Nm/s, shock onset rate threshold to arm observation window (smooth approach ~35 Nm/s, flat <5 Nm/s)
     double shock_window_duration         = 0.35;   // s, transient shock observation window (ample margin for motor ramp-up)
     double sustain_confirm_duration      = 0.05;   // s, required sustained load duration to confirm impact (5 frames at 100Hz)

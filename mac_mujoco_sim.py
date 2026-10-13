@@ -269,6 +269,16 @@ def main():
                     if 'cmd' in msg and len(msg['cmd']) == 12:
                         for i in range(12):
                             data.ctrl[i] = msg['cmd'][i]
+                    # Reset applied generalized forces
+                    data.qfrc_applied[:] = 0.0
+                    if 'torque' in msg and len(msg['torque']) == 12:
+                        # Feedforward torque injection (MIT Hybrid Impedance Control)
+                        for i in range(4, 8):  # Eccentric posture joints
+                            jname = JOINT_NAMES[i]
+                            jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, jname)
+                            if jid != -1:
+                                dof_adr = model.jnt_dofadr[jid]
+                                data.qfrc_applied[dof_adr] = float(msg['torque'][i])
             except Exception:
                 pass
 

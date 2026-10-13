@@ -20,9 +20,12 @@ void ClimbGeometryEstimator::reset() {
 void ClimbGeometryEstimator::update(
     const BodyState& body_state,
     const std::array<Eigen::Vector3d, NUM_LEGS>& contact_points_world,
+    const Eigen::Vector4d& current_ecc_angles,
     const Eigen::Vector4d& current_wheel_vels,
     const Eigen::Vector4d& current_wheel_efforts,
     const Eigen::Vector4d& target_wheel_vels,
+    const Eigen::Vector3d& omega_body,
+    double target_step_height,
     double dt)
 {
     if (dt <= 0.0 || dt > 0.5) return;
@@ -39,40 +42,55 @@ void ClimbGeometryEstimator::update(
     filtered_delta_height_ += alpha * (raw_delta_h - filtered_delta_height_);
     geometry_.delta_height = filtered_delta_height_;
 
-    // 2. Chassis Euler angles
+    // 2. Chassis Euler angles & Standardized Nose-Up Pitch
     geometry_.body_pitch = body_state.pitch();
     geometry_.body_roll = body_state.roll();
 
-    // 3. CoM longitudinal support margin (distance from CoM to rear wheel contact boundary)
+    Eigen::Matrix3d R = body_state.orientation.toRotationMatrix();
+    // R(2, 0) is world Z component of body +X (forward nose) vector
+    geometry_.nose_up_pitch = std::asin(std::clamp(R(2, 0), -1.0, 1.0));
+    // When nose is pitching up, omega_body.y() < 0 (right-hand rule around body +Y left axis)
+    geometry_.nose_up_pitch_rate = -omega_body.y();
+
+    // 3. Rear hip height in world frame (posture joint is l_ecc*cos(q_r) above wheel axle)
+    double q_r_avg = 0.5 * (current_ecc_angles(RL) + current_ecc_angles(RR));
+    geometry_.rear_hip_z = r_h + params_.r_wheel + params_.l_ecc * std::cos(q_r_avg);
+    geometry_.rear_hip_cleared = (geometry_.rear_hip_z >= target_step_height + 0.015);
+
+    // 4. CoM longitudinal support margin (distance from CoM to rear wheel contact boundary)
     double rear_contact_x = 0.5 * (contact_points_world[RL].x() + contact_points_world[RR].x());
     geometry_.com_support_margin = body_state.position.x() - rear_contact_x;
 
-    // 4. Edge cresting detection
-    // Front edge cresting: front wheels have climbed above curb edge
-    // Indicated by delta_height reaching threshold (> 0.16m) AND wheel velocities picking up
+    // 5. Front wall climbing detection:
+    // When front wheels are climbing vertical face, nose pitches up sharply with positive wheel height delta
+    geometry_.front_wall_climbing = (geometry_.delta_height > 0.035 &&
+                                     geometry_.nose_up_pitch > 0.070 &&
+                                     geometry_.nose_up_pitch_rate > 0.15);
+
+    // 6. Edge cresting detection
     bool fl_spinning = std::abs(current_wheel_vels(FL)) > 0.3 * std::max(0.5, std::abs(target_wheel_vels(FL)));
     bool fr_spinning = std::abs(current_wheel_vels(FR)) > 0.3 * std::max(0.5, std::abs(target_wheel_vels(FR)));
     bool fl_effort_dropped = std::abs(current_wheel_efforts(FL)) < 4.0;
     bool fr_effort_dropped = std::abs(current_wheel_efforts(FR)) < 4.0;
 
-    if (geometry_.delta_height > 0.15 && (fl_spinning || fr_spinning) && (fl_effort_dropped || fr_effort_dropped)) {
+    double crest_h_thresh = std::max(0.06, target_step_height - 0.04);
+    if (geometry_.delta_height > crest_h_thresh && (fl_spinning || fr_spinning) && (fl_effort_dropped || fr_effort_dropped)) {
         front_crest_timer_ += dt;
         if (front_crest_timer_ >= 0.05) {
             geometry_.front_edge_crested = true;
         }
     } else {
         front_crest_timer_ = std::max(0.0, front_crest_timer_ - dt);
-        if (geometry_.delta_height < 0.10) {
+        if (geometry_.delta_height < 0.05) {
             geometry_.front_edge_crested = false;
         }
     }
 
     // Rear edge cresting: rear wheels have climbed onto the plateau
-    // Indicated by delta_height falling back near zero (< 0.06m) while in rear climb phase
     bool rl_spinning = std::abs(current_wheel_vels(RL)) > 0.3 * std::max(0.5, std::abs(target_wheel_vels(RL)));
     bool rr_spinning = std::abs(current_wheel_vels(RR)) > 0.3 * std::max(0.5, std::abs(target_wheel_vels(RR)));
 
-    if (geometry_.front_height > 0.16 && geometry_.rear_height > 0.16 &&
+    if (geometry_.front_height > crest_h_thresh && geometry_.rear_height > crest_h_thresh &&
         std::abs(geometry_.delta_height) < 0.05 && (rl_spinning || rr_spinning)) {
         rear_crest_timer_ += dt;
         if (rear_crest_timer_ >= 0.05) {

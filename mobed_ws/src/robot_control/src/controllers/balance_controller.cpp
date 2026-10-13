@@ -119,11 +119,11 @@ void BalanceController::computeGainSchedule(
     // To prevent division by zero, ensure h_max - h_mid > 0
     double den = std::max(1e-6, h_max - h_mid);
 
-    // Eq 16: Exact paper linear formula. Range is [0, 2.0]
-    // At h_cmd = h_max (0.22m): w_grf = 0.0 (converges smoothly to 0 near singularity)
+    // Eq 16: Exact paper square-root formula
+    // At h_cmd = h_max (0.22m): w_grf = 0.0 (rapid convergence to 0 near singularity)
     // At h_cmd = h_mid (0.15m): w_grf = 1.0
-    // At h_cmd = h_min (0.08m): w_grf = 2.0
-    w_grf = std::abs(h_max - h_cmd) / den;
+    // At h_cmd = h_min (0.08m): w_grf = sqrt(2.0) ≈ 1.414
+    w_grf = std::sqrt(std::max(0.0, std::abs(h_max - h_cmd)) / den);
 
     // Eq 17: Kh = 7.0 from paper, scaled by dynamic payload mass ratio
     double Kh = 7.0; // from paper
@@ -359,6 +359,14 @@ ControlOutput BalanceController::updateHybrid(
     Eigen::Vector4d grf_torques = grf_optimizer_.grfToEccTorque(
         optimal_grf, current_ecc_angles, current_steer_angles,
         safe_roll, safe_pitch);
+
+    // Singularity protection (near vertical leg stroke |q_ecc| < 12 deg ≈ 0.21 rad):
+    // Smoothly taper off grf_torques to prevent torque blow-up as vertical Jacobian J_z -> 0
+    for (int i = 0; i < NUM_LEGS; ++i) {
+        double abs_q = std::abs(current_ecc_angles(i));
+        double taper = std::clamp(abs_q / 0.21, 0.0, 1.0);
+        grf_torques(i) *= taper;
+    }
 
     // ================================================================
     // 3. Gain Scheduling — blend IK and GRF (using h_adapt)

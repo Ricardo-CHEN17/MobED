@@ -20,6 +20,7 @@ void TerrainEstimator::reset() {
     terrain_state_.roll_slope  = 0.0;
     terrain_state_.is_valid = false;
     gravity_normal_prev_ = Eigen::Vector3d(0.0, 0.0, 1.0);
+    in_non_planar_zone_ = false;
 }
 
 void TerrainEstimator::update(
@@ -69,7 +70,7 @@ void TerrainEstimator::update(
     Eigen::Vector3d p_RR = R_base * foot_pos_in_base[RR];
 
     double torsion = std::abs((p_FL.z() - p_FR.z()) - (p_RL.z() - p_RR.z()));
-    bool is_torsion_warped = (torsion > params_.max_torsion_threshold);
+
 
     // ================================================================
     // 2. Coplanarity Residual & 3-Point Degradation Guard:
@@ -103,11 +104,27 @@ void TerrainEstimator::update(
         }
     }
 
-    if (is_torsion_warped || rms_residual > params_.terrain_coplanar_residual_threshold ||
-        (valid_points.size() == 3 && fourth_wheel_dist > params_.terrain_coplanar_residual_threshold)) {
-        // High warping / non-coplanar / unverified 3-point plane: this is micro-terrain (cobblestones/bumps/single-leg lift).
-        // Snap to flat ground so kinematic IK does NOT rock the chassis or latch lifted leg!
-        raw_normal = Eigen::Vector3d(0.0, 0.0, 1.0);
+    // Dual-threshold hysteresis for non-planar micro-terrain:
+    // Entry threshold (trigger): 12mm residual or 14mm torsion
+    // Exit threshold (recovery): 7mm residual and 8mm torsion
+    double trigger_residual = 0.012;
+    double recovery_residual = 0.007;
+    double trigger_torsion  = 0.014;
+    double recovery_torsion = 0.008;
+
+    if (rms_residual > trigger_residual || torsion > trigger_torsion ||
+        (valid_points.size() == 3 && fourth_wheel_dist > trigger_residual)) {
+        in_non_planar_zone_ = true;
+    } else if (rms_residual < recovery_residual && torsion < recovery_torsion &&
+               (valid_points.size() != 3 || fourth_wheel_dist < recovery_residual)) {
+        in_non_planar_zone_ = false;
+    }
+
+    if (in_non_planar_zone_) {
+        // Non-planar zone: maintain previous valid normal and smoothly decay towards vertical,
+        // preventing abrupt single-frame step changes in R_T from inducing chassis twitches
+        const double decay_rate = 0.04; // slow smooth relaxation (tau ≈ 250ms at 100Hz)
+        raw_normal = ((1.0 - decay_rate) * gravity_normal_prev_ + decay_rate * Eigen::Vector3d(0.0, 0.0, 1.0)).normalized();
     }
 
     // Apply low-pass filter to prevent transient spikes from inducing latching
