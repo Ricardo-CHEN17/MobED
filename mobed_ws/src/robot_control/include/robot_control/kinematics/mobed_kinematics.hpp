@@ -25,7 +25,10 @@ struct MobedParameters {
     // CAD Mechanical Offsets
     double posture_z_offset = 0.045; // Posture joint is 4.5cm lower than Steer joint
 
-    
+    // Chassis collision box dimensions (CAD half-dimensions)
+    double chassis_box_x = 0.18; // m
+    double chassis_box_y = 0.13; // m
+
     // Limits
     double max_height = 0.22;
     double min_height = 0.08;
@@ -103,6 +106,15 @@ public:
      * @brief Get the robot parameters
      */
     const MobedParameters& getParams() const { return params_; }
+
+    /**
+     * @brief Get forbidden inward steering angle sector [min_angle, max_angle] for a leg
+     * 
+     * @param leg_index Leg index (FL, FR, RL, RR)
+     * @param q_ecc Current eccentric posture angle (rad)
+     * @return std::pair<double, double> [min_angle, max_angle] in [-pi, pi]. If no collision, returns {0.0, 0.0}
+     */
+    std::pair<double, double> getForbiddenSteerSector(int leg_index, double q_ecc) const;
 
     /**
      * @brief Utility to normalize angle to [-pi, pi]

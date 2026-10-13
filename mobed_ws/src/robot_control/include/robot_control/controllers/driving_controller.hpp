@@ -13,11 +13,11 @@ struct DrivingControllerParams {
     double max_wheel_accel = 10.0; // rad/s^2
     double max_steer_vel = 5.0;    // rad/s
 
-    // ---- Steering Constraint (geometric anti-collision Section III.D) ----
-    // Maximum allowable steering angle towards the inward (chassis) direction
-    double max_inward_steer_angle = 1.15;   // rad (~66 deg)
-    // Maximum allowable steering angle towards the outward direction
-    double max_outward_steer_angle = 1.57;  // rad (90 deg)
+    // ---- Swerve Steering Optimization & Coherent Drive Gating ----
+    // Enables coherent whole-body velocity scaling to preserve instantaneous ICR during steering transitions
+    bool enable_coherent_drive_scaling = true;
+    // Maximum steer alignment deadband for full drive power (rad, ~4.5 deg)
+    double steer_alignment_deadband = 0.08;
 
     // ---- Bank Angle Calculator (Eq 8 in paper) ----
     // Maximum allowable bank angle (roll induced by centripetal force)
@@ -129,16 +129,20 @@ private:
     double zero_cmd_duration_ = 0.0;    // duration in seconds for which cmd_vel has been ~0
 
     /**
-     * @brief Steering Constraint Function (Section III.D in paper)
-     * Dynamically limits the steer range based on current eccentric angle
-     * and projects wheel speed onto the safe direction.
+     * @brief Two-Stage Swerve Optimization with 180-deg Wheel Inversion Escape
+     * Evaluates candidate state A (theta, v) and inverted state B (theta +- pi, -v).
+     * Chooses shortest angular distance while actively evading forbidden inward sectors.
+     * (Section III.D in paper & RoboMaster Swerve Architecture)
      * 
      * @param leg_index Leg index (FL, FR, RL, RR)
-     * @param[in,out] steer Target steering angle to be constrained (rad)
-     * @param[in,out] speed Target wheel speed to be projected (rad/s)
-     * @param current_ecc Current eccentric posture angle (rad)
+     * @param des_steer Desired steering angle from kinematics (rad)
+     * @param des_speed Desired wheel velocity from kinematics (rad/s)
+     * @param curr_steer Current actual steering angle (rad)
+     * @param curr_ecc Current eccentric posture angle (rad)
+     * @return std::pair<double, double> Optimized (steer_angle, wheel_speed)
      */
-    void applySteerConstraint(int leg_index, double& steer, double& speed, double current_ecc) const;
+    std::pair<double, double> optimizeSwerveModule(
+        int leg_index, double des_steer, double des_speed, double curr_steer, double curr_ecc) const;
 };
 
 }  // namespace controllers

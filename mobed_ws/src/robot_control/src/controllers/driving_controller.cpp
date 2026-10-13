@@ -36,49 +36,49 @@ double DrivingController::computeBankAngle(const Eigen::Vector3d& cmd_vel) const
     return bank;
 }
 
-void DrivingController::applySteerConstraint(
-    int leg_index, double& steer, double& speed, double current_ecc) const {
-    // Dynamic inward steering limit based on current eccentric posture angle (Section III.D)
-    // When the eccentric arm is more horizontally extended (|current_ecc| is large),
-    // the wheel contact point extends further, so turning inward brings it even closer
-    // to the chassis boundary. We dynamically tighten the inward limit accordingly.
-    double max_inward = params_.max_inward_steer_angle;
-    double ecc_mag = std::abs(current_ecc);
-    if (ecc_mag > 0.8) {
-        max_inward = std::max(0.78, params_.max_inward_steer_angle - 0.3 * (ecc_mag - 0.8));
-    }
-    double max_outward = params_.max_outward_steer_angle;
-
-    // Safe steering angle range [min_steer, max_steer] for each leg:
-    // - FL (leg 0): turning left (>0) is outward; turning right (<0) is inward towards chassis.
-    //               safe range: [-max_inward, +max_outward]
-    // - FR (leg 1): turning right (<0) is outward; turning left (>0) is inward towards chassis.
-    //               safe range: [-max_outward, +max_inward]
-    // - RL (leg 2, q_ecc < 0 in outward config): turning right (<0) is outward; turning left (>0) is inward.
-    //               safe range: [-max_outward, +max_inward]
-    // - RR (leg 3, q_ecc < 0 in outward config): turning left (>0) is outward; turning right (<0) is inward.
-    //               safe range: [-max_inward, +max_outward]
-    double min_steer, max_steer;
-    if (leg_index == 0 || leg_index == 3) {
-        // FL (0) or RR (3)
-        min_steer = -max_inward;
-        max_steer =  max_outward;
-    } else {
-        // FR (1) or RL (2)
-        min_steer = -max_outward;
-        max_steer =  max_inward;
+std::pair<double, double> DrivingController::optimizeSwerveModule(
+    int leg_index, double des_steer, double des_speed, double curr_steer, double curr_ecc) const {
+    
+    if (std::abs(des_speed) < 1e-3) {
+        return {curr_steer, 0.0};
     }
 
-    double orig_steer = steer;
-    steer = std::clamp(steer, min_steer, max_steer);
+    // Candidate State A: (des_steer, des_speed)
+    double s_A = kinematics_->normalize_angle(des_steer);
+    double v_A = des_speed;
 
-    // Project wheel speed onto the clamped steering heading
-    double angle_error = steer - orig_steer;
-    double proj_factor = std::cos(angle_error);
-    if (proj_factor <= 0.0) {
-        speed = 0.0;
+    // Inverted State B: (des_steer +- pi, -des_speed)
+    // Exact physical equivalence: produces identical ground traction vector
+    double s_B = kinematics_->normalize_angle(des_steer + M_PI);
+    double v_B = -des_speed;
+
+    // Query dynamic geometric forbidden inward sector from kinematics
+    auto [forbid_min, forbid_max] = kinematics_->getForbiddenSteerSector(leg_index, curr_ecc);
+    bool has_forbid = (forbid_min != forbid_max);
+
+    // Check collision safety for both states
+    bool safe_A = true;
+    bool safe_B = true;
+    if (has_forbid) {
+        safe_A = (s_A < forbid_min || s_A > forbid_max);
+        safe_B = (s_B < forbid_min || s_B > forbid_max);
+    }
+
+    double diff_A = std::abs(kinematics_->normalize_angle(s_A - curr_steer));
+    double diff_B = std::abs(kinematics_->normalize_angle(s_B - curr_steer));
+
+    if (safe_A && safe_B) {
+        // Both safe: choose shortest angular travel (|delta| <= 90 deg)
+        return (diff_A <= diff_B) ? std::make_pair(s_A, v_A) : std::make_pair(s_B, v_B);
+    } else if (safe_A) {
+        return {s_A, v_A};
+    } else if (safe_B) {
+        // Active evasion: flip 180 deg to free outward sector with 0% force loss
+        return {s_B, v_B};
     } else {
-        speed *= proj_factor;
+        // Extremely rare double-restriction fallback: clamp to nearest boundary
+        double clamped_s = std::clamp(s_A, forbid_min, forbid_max);
+        return {clamped_s, 0.0};
     }
 }
 
@@ -148,25 +148,54 @@ std::tuple<Eigen::Vector4d, Eigen::Vector4d> DrivingController::update(
         }
     }
 
+    // ============================================================
+    // 3. Two-Stage Swerve Optimization (Shortest-Path + 180-deg Inversion Escape)
+    // ============================================================
+    Eigen::Vector4d opt_steer = prev_steer_angles_;
+    Eigen::Vector4d opt_speed = prev_wheel_speeds_;
+
+    for (int i = 0; i < 4; ++i) {
+        auto [s, w] = optimizeSwerveModule(
+            i, raw_steer_angles(i), raw_wheel_speeds(i),
+            prev_steer_angles_(i), current_ecc_angles(i));
+        opt_steer(i) = s;
+        opt_speed(i) = w;
+    }
+
+    // ============================================================
+    // 4. Chassis-Level Coherent Drive Scaling (RoboMaster Swerve Principle)
+    // Scale driving wheel speeds by cos(max_error) so wheels don't fight while rotating into alignment!
+    // ============================================================
+    double max_steer_error = 0.0;
+    for (int i = 0; i < 4; ++i) {
+        double err = std::abs(kinematics_->normalize_angle(opt_steer(i) - current_steer_angles(i)));
+        if (err > max_steer_error) {
+            max_steer_error = err;
+        }
+    }
+
+    double coherent_drive_scale = 1.0;
+    if (params_.enable_coherent_drive_scaling) {
+        if (max_steer_error > params_.steer_alignment_deadband) {
+            coherent_drive_scale = std::max(0.0, std::cos(max_steer_error));
+        }
+    }
+
+    // ============================================================
+    // 5. Slew Rate Limiting (Speed/Accel & Steering velocity)
+    // ============================================================
     Eigen::Vector4d final_steer = prev_steer_angles_;
     Eigen::Vector4d final_speed = prev_wheel_speeds_;
 
     for (int i = 0; i < 4; ++i) {
-        // ============================================================
-        // 3. Steering Constraint Function (geometric anti-collision)
-        // ============================================================
-        applySteerConstraint(i, raw_steer_angles(i), raw_wheel_speeds(i), current_ecc_angles(i));
-
-        // ============================================================
-        // 4. Slew Rate Limiting (Speed/Accel)
-        // ============================================================
-        double speed_delta = raw_wheel_speeds(i) - prev_wheel_speeds_(i);
+        double target_speed = opt_speed(i) * coherent_drive_scale;
+        double speed_delta = target_speed - prev_wheel_speeds_(i);
         double max_speed_delta = params_.max_wheel_accel * dt;
         speed_delta = std::clamp(speed_delta, -max_speed_delta, max_speed_delta);
         final_speed(i) = prev_wheel_speeds_(i) + speed_delta;
 
         // Rate Limiting (Steering) with shortest-path angular normalization
-        double steer_delta = kinematics_->normalize_angle(raw_steer_angles(i) - prev_steer_angles_(i));
+        double steer_delta = kinematics_->normalize_angle(opt_steer(i) - prev_steer_angles_(i));
         double max_steer_delta = params_.max_steer_vel * dt;
         steer_delta = std::clamp(steer_delta, -max_steer_delta, max_steer_delta);
         final_steer(i) = kinematics_->normalize_angle(prev_steer_angles_(i) + steer_delta);

@@ -33,37 +33,33 @@ std::tuple<Eigen::Vector4d, Eigen::Vector4d> MobedKinematics::computeDrivingIK(
     double wz = v_body.z();
 
     for (int i = 0; i < 4; ++i) {
-        // 1. Wheel contact point position in Base frame ^B r_i (Section III.D & Eq 7)
-        Eigen::Vector3d B_r_i = computeFootPositionInBase(i, current_steer_angles(i), current_ecc_angles(i));
-        double rx = B_r_i.x();
-        double ry = B_r_i.y();
-        
-        // 2. Linear velocity vector of wheel contact point on ground plane: v_W,i = v_body + omega x ^B r_i
-        double v_ix = vx - wz * ry;
-        double v_iy = vy + wz * rx;
-        
-        double target_steer = std::atan2(v_iy, v_ix);
+        double q_str = current_steer_angles(i);
+        double q_ecc = current_ecc_angles(i);
+
+        // Fixed-Point Iteration (2 steps) to eliminate kinematic loop between q_str and contact point ^B r_i.
+        // Guarantees instantaneous ICR consistency during high-speed spinning (Section III.D & Eq 7)
+        // Step 1: Initial estimate using seed steering angle
+        Eigen::Vector3d B_r_i = computeFootPositionInBase(i, q_str, q_ecc);
+        double v_ix = vx - wz * B_r_i.y();
+        double v_iy = vy + wz * B_r_i.x();
         double speed = std::sqrt(v_ix * v_ix + v_iy * v_iy) / params_.r_wheel;
-        
-        if (std::abs(speed) < 1e-3) {
-            target_steer = current_steer_angles(i);
-            speed = 0.0;
-        } else {
-            // 3. Strict mapping to outward hemisphere [-pi/2, pi/2] (Section III.D)
-            // If the desired velocity vector points rearward, keep the steering angle
-            // facing forward/outward and reverse the wheel driving motor (speed = -speed).
-            // This guarantees the steering joint never rotates 180 deg into the under-chassis region.
-            while (target_steer > M_PI_2) {
-                target_steer -= M_PI;
-                speed = -speed;
-            }
-            while (target_steer < -M_PI_2) {
-                target_steer += M_PI;
-                speed = -speed;
-            }
+
+        if (speed < 1e-3) {
+            target_steer_angles(i) = current_steer_angles(i);
+            target_wheel_speeds(i) = 0.0;
+            continue;
         }
 
-        target_steer_angles(i) = target_steer;
+        double steer_iter = std::atan2(v_iy, v_ix);
+
+        // Step 2: Refined estimate with steer_iter
+        B_r_i = computeFootPositionInBase(i, steer_iter, q_ecc);
+        v_ix = vx - wz * B_r_i.y();
+        v_iy = vy + wz * B_r_i.x();
+        speed = std::sqrt(v_ix * v_ix + v_iy * v_iy) / params_.r_wheel;
+        double final_steer = std::atan2(v_iy, v_ix);
+
+        target_steer_angles(i) = normalize_angle(final_steer);
         target_wheel_speeds(i) = speed;
     }
 
@@ -169,6 +165,28 @@ Eigen::Vector3d MobedKinematics::computeFootPositionInBase(
         py + params_.l_ecc * std::sin(q_str) * std::sin(q_ecc),
         -params_.posture_z_offset - params_.l_ecc * std::cos(q_ecc) - params_.r_wheel
     );
+}
+
+std::pair<double, double> MobedKinematics::getForbiddenSteerSector(int leg_index, double q_ecc) const {
+    // Only when eccentric angle lifts the wheel into the chassis Z-plane (q_ecc > 0.45 rad)
+    // does any mechanical collision risk exist (Section III.D in paper).
+    if (std::abs(q_ecc) < 0.45) {
+        return {0.0, 0.0}; // No forbidden sector, full 360 deg safe!
+    }
+
+    // Expand collision forbidden sector slightly if eccentric arm is extensively rotated (crouch mode)
+    double extra = (std::abs(q_ecc) > 1.0) ? 0.20 : 0.0;
+
+    bool is_left_side = (leg_index == FL || leg_index == RL);
+    if (is_left_side) {
+        // Left legs (FL, RL): Inward quadrant points towards -Y (clockwise rotation)
+        // Forbidden inward sector: approximately [-150 deg, -30 deg]
+        return {-2.62 - extra, -0.52 + extra};
+    } else {
+        // Right legs (FR, RR): Inward quadrant points towards +Y (counter-clockwise rotation)
+        // Forbidden inward sector: approximately [+30 deg, +150 deg]
+        return {0.52 - extra, 2.62 + extra};
+    }
 }
 
 } // namespace kinematics
