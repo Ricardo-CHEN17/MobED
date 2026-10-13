@@ -49,28 +49,27 @@ void TaskController::transitionTo(ClimbState new_state) {
     travel_distance_ = 0.0;
 }
 
-double TaskController::computeAdaptiveLiftAngle([[maybe_unused]] double q_start) const {
-    if (params_.climb_mode == ClimbMode::HIGH_200MM || params_.target_curb_height >= 0.18) {
-        return 2.80;
-    }
-    return 1.65;
+double TaskController::computeFrontTargetAngle(double h_curb) const {
+    double ratio = std::clamp((h_curb - 0.04) / (0.20 - 0.04), 0.0, 1.0);
+    // Maps [0.04m, 0.20m] smoothly to [1.45 rad, 2.60 rad] (149°, safely below 180° singularity)
+    return 1.45 + ratio * (2.60 - 1.45);
 }
 
-double TaskController::computeRearLevelingAngle(double q_front_avg, double h_curb) const {
-    const double l_ecc = 0.075;
-    double cos_target = std::cos(q_front_avg) + (h_curb / l_ecc);
-    if (cos_target >= std::cos(MIN_SINGULARITY_INCLINATION)) {
-        return -MIN_SINGULARITY_INCLINATION;
-    }
-    cos_target = std::clamp(cos_target, -1.0, 1.0);
-    return -std::acos(cos_target);
+double TaskController::computeAdaptiveLiftAngle([[maybe_unused]] double q_start) const {
+    return computeFrontTargetAngle(params_.target_curb_height);
+}
+
+double TaskController::computeRearLevelingAngle([[maybe_unused]] double q_front_avg, double h_curb) const {
+    double ratio = std::clamp((h_curb - 0.04) / (0.20 - 0.04), 0.0, 1.0);
+    // Smooth transition from -0.55 rad (gentle 40mm) to -0.21 rad (extreme 200mm high clearance)
+    return -0.55 + ratio * (-0.21 - (-0.55));
 }
 
 std::string TaskController::getStateName() const {
     switch (state_) {
         case ClimbState::IDLE:              return "IDLE";
         case ClimbState::FRONT_WALL_CLIMB:  return "FRONT_WALL_CLIMB";
-        case ClimbState::FRONT_PLACED:      return "FRONT_PLACED";
+        case ClimbState::STRADDLE_LEVELING: return "STRADDLE_LEVELING";
         case ClimbState::REAR_WALL_CLIMB:   return "REAR_WALL_CLIMB";
         case ClimbState::REAR_CREST_FOLD:   return "REAR_CREST_FOLD";
         case ClimbState::REAR_PLACED:       return "REAR_PLACED";
@@ -102,12 +101,11 @@ void TaskController::update(
         // 0. IDLE: Normal driving, monitoring for front wheel impact or wall-climbing
         // ============================================================
         case ClimbState::IDLE: {
-            if (has_climbed_) {
-                break;
-            }
-
             if (cooldown_timer_ > 0.0) {
                 cooldown_timer_ = std::max(0.0, cooldown_timer_ - dt);
+                if (cooldown_timer_ <= 0.0) {
+                    has_climbed_ = false; // Auto-clear lockout after cooldown expires
+                }
                 break;
             }
 
@@ -115,9 +113,13 @@ void TaskController::update(
                 lift_start_angles_ = current_ecc_angles;
                 current_front_target_ = 0.5 * (current_ecc_angles(FL) + current_ecc_angles(FR));
 
-                double target_f = 2.80;
+                double target_f = computeFrontTargetAngle(params_.target_curb_height);
                 front_target_angles_(0) = target_f;
                 front_target_angles_(1) = target_f;
+
+                double target_r = computeRearLevelingAngle(target_f, params_.target_curb_height);
+                rear_target_angles_(0) = target_r;
+                rear_target_angles_(1) = target_r;
 
                 active_lift_mask_[FL] = true;
                 active_lift_mask_[FR] = true;
@@ -132,17 +134,17 @@ void TaskController::update(
         // 1. FRONT_WALL_CLIMB: Front wheels roll up wall; eccentric arms fold with pitch feedback
         // ============================================================
         case ClimbState::FRONT_WALL_CLIMB: {
-            bool is_high_mode = (params_.climb_mode == ClimbMode::HIGH_200MM || params_.target_curb_height >= 0.18);
-            double theta_ref = is_high_mode ? 0.130 : 0.070; // 7.5 deg for 200mm, 4.0 deg for 100mm
+            double h = params_.target_curb_height;
+            double theta_ref = 0.060 + (h - 0.04) / (0.20 - 0.04) * (0.130 - 0.060);
 
             // Closed-loop pitch compliance rate:
-            // When front wheels climb vertical wall, nose pitches up (geometry.nose_up_pitch > theta_ref).
-            // Front eccentric arms fold upward at a matching rate to absorb the height and prevent backward flipping.
+            // When front wheels climb vertical wall, nose pitches up.
+            // Front eccentric arms fold upward at matching rate to absorb height and prevent backward flipping.
             double pitch_err = geometry.nose_up_pitch - theta_ref;
-            double q_dot_fold = 0.0;
+            double q_dot_fold = 0.8; // steady feedforward climbing rate
             if (geometry.nose_up_pitch > theta_ref - 0.035) {
                 q_dot_fold = 1.2 + 6.0 * pitch_err + 0.4 * geometry.nose_up_pitch_rate;
-                q_dot_fold = std::clamp(q_dot_fold, 0.0, 3.0);
+                q_dot_fold = std::clamp(q_dot_fold, 0.0, 3.5);
             }
 
             current_front_target_ += q_dot_fold * dt;
@@ -156,76 +158,72 @@ void TaskController::update(
             ecc_overrides_(FL) = current_front_target_;
             ecc_overrides_(FR) = current_front_target_;
 
-            // Rear legs active leveling: extend downward (-0.12 rad) to raise rear of chassis
+            // Rear legs active leveling: extend downward (-0.21 rad to -0.55 rad) to raise rear hip
             override_mask_[RL] = true;
             override_mask_[RR] = true;
-            ecc_overrides_(RL) = -MIN_SINGULARITY_INCLINATION;
-            ecc_overrides_(RR) = -MIN_SINGULARITY_INCLINATION;
+            ecc_overrides_(RL) = rear_target_angles_(0);
+            ecc_overrides_(RR) = rear_target_angles_(1);
 
             // Traction drive: front wheels spin forward to grip wall, rear wheels push forward
             wheel_override_mask_.fill(true);
             wheel_speed_overrides_(FL) = params_.front_roll_speed;
             wheel_speed_overrides_(FR) = params_.front_roll_speed;
             double rear_push_vx = 0.15;
-            wheel_speed_overrides_(RL) = rear_push_vx / 0.065;
-            wheel_speed_overrides_(RR) = rear_push_vx / 0.065;
+            wheel_speed_overrides_(RL) = rear_push_vx / params_.wheel_radius;
+            wheel_speed_overrides_(RR) = rear_push_vx / params_.wheel_radius;
             forward_vel_override_ = rear_push_vx;
 
-            // Check if front wheels have crested the curb edge
+            // Check if front wheels have crested curb edge
             bool height_reached = geometry.delta_height >= (params_.target_curb_height - 0.025);
             bool target_reached = current_front_target_ >= (front_target_angles_(0) - 0.08);
             bool front_crested = (height_reached && target_reached) || geometry.front_edge_crested;
+            double max_front_climb_time = (h >= 0.15) ? 1.6 : 1.2;
 
-            if (front_crested || state_timer_ >= 1.2) {
-                transitionTo(ClimbState::FRONT_PLACED);
+            if (front_crested || state_timer_ >= max_front_climb_time) {
+                transitionTo(ClimbState::STRADDLE_LEVELING);
             }
             break;
         }
 
         // ============================================================
-        // 2. FRONT_PLACED: Front wheels on top of curb; full-stride forward advance
+        // 2. STRADDLE_LEVELING: Front wheels on top of curb; adaptive near-level differential advance
         // ============================================================
-        case ClimbState::FRONT_PLACED: {
+        case ClimbState::STRADDLE_LEVELING: {
+            // Front legs held on top of curb
             override_mask_[FL] = true;
             override_mask_[FR] = true;
             ecc_overrides_(FL) = front_target_angles_(0);
             ecc_overrides_(FR) = front_target_angles_(1);
 
-            // Maintain rear legs extended (-0.12 rad) for ample belly clearance
+            // Rear legs maintained in near-level extended stance for ample belly clearance (>21mm)
             override_mask_[RL] = true;
             override_mask_[RR] = true;
-            ecc_overrides_(RL) = -MIN_SINGULARITY_INCLINATION;
-            ecc_overrides_(RR) = -MIN_SINGULARITY_INCLINATION;
+            ecc_overrides_(RL) = rear_target_angles_(0);
+            ecc_overrides_(RR) = rear_target_angles_(1);
 
             // Command forward drive to advance the body toward the curb
             forward_vel_override_ = params_.forward_drive_speed;
             wheel_override_mask_.fill(true);
-            wheel_speed_overrides_.setConstant(params_.forward_drive_speed / 0.065);
+            wheel_speed_overrides_.setConstant(params_.forward_drive_speed / params_.wheel_radius);
 
             // Integrate travel distance
             double effective_vx = (std::abs(body_vx) > 0.02) ? std::abs(body_vx) : params_.forward_drive_speed;
             travel_distance_ += effective_vx * dt;
 
-            // Distance from rear wheels to curb face after front wheels are placed:
-            // Mode 1: rear wheels start ~0.50m from curb, needing ~0.52m advance
-            // Mode 2: body already advanced partially on high step crest, needing ~0.38m advance
-            double advance_to_rear_curb = 0.38;
-            bool in_rear_contact_window = (travel_distance_ >= 0.28);
+            // Distance to rear curb arrival:
+            // Chassis wheelbase is 0.30m, eccentric offset difference brings rear wheels to face after ~0.35m
+            double advance_to_rear_curb = 0.35;
+            bool in_rear_contact_window = (travel_distance_ >= 0.22);
 
-            // Rear wall arrival check (multi-modal: impact detection, physical displacement, or height rise):
-            // 1. Direct rear impact detected by contact detector
-            // 2. Kinematic travel distance brings rear wheels to the curb face
-            // 3. Rear wheel contact height rises within contact window
-            // 4. Contact detector registers persistent rear wall collision after initial advance
             bool rear_arrived = (in_rear_contact_window && contact_detector.rearImpactDetected()) ||
                                 (travel_distance_ >= advance_to_rear_curb) ||
                                 (in_rear_contact_window && geometry.rear_height > 0.030) ||
                                 (contact_detector.rearImpactDetected() && state_timer_ >= 0.8);
 
-            // Anti-stall traction assist: if advance is taking longer than 2.0s, slightly ramp forward drive
+            // Anti-stall traction assist: ramp forward drive if advance takes longer than 2.0s
             if (state_timer_ > 2.0) {
                 forward_vel_override_ = params_.forward_drive_speed * 1.25;
-                wheel_speed_overrides_.setConstant(forward_vel_override_ / 0.065);
+                wheel_speed_overrides_.setConstant(forward_vel_override_ / params_.wheel_radius);
             }
 
             if (rear_arrived) {
@@ -234,8 +232,7 @@ void TaskController::update(
                 travel_distance_ = 0.0;
                 transitionTo(ClimbState::REAR_WALL_CLIMB);
             } else if (state_timer_ >= 8.0) {
-                // Safety abort after prolonged stall:
-                // NEVER set has_climbed_ = true here, so that climbing is not falsely locked out!
+                // Safety abort after prolonged stall: never lock has_climbed_ so it can re-trigger
                 cooldown_timer_ = params_.cooldown_duration;
                 transitionTo(ClimbState::IDLE);
             }
@@ -243,7 +240,7 @@ void TaskController::update(
         }
 
         // ============================================================
-        // 3. REAR_WALL_CLIMB (Stage R1): Rear legs LOCKED at -0.12 rad, rear wheels climb wall
+        // 3. REAR_WALL_CLIMB: Rear wheels climb wall with front pulling assist
         // ============================================================
         case ClimbState::REAR_WALL_CLIMB: {
             // Front wheels pull forward on top of plateau
@@ -252,76 +249,89 @@ void TaskController::update(
             ecc_overrides_(FL) = front_target_angles_(0);
             ecc_overrides_(FR) = front_target_angles_(1);
 
-            // Stage R1: Keep rear legs LOCKED at -0.12 rad so steering columns stay 56mm behind curb wall
+            // Rear legs: active lift sweep upward
             override_mask_[RL] = true;
             override_mask_[RR] = true;
-            ecc_overrides_(RL) = -MIN_SINGULARITY_INCLINATION;
-            ecc_overrides_(RR) = -MIN_SINGULARITY_INCLINATION;
+            double q_r_target = -front_target_angles_(0);
+            double rear_sweep_progress = std::clamp(state_timer_ / 0.60, 0.0, 1.0);
+            double current_rear_q = (1.0 - rear_sweep_progress) * rear_target_angles_(0) + rear_sweep_progress * q_r_target;
+            ecc_overrides_(RL) = current_rear_q;
+            ecc_overrides_(RR) = current_rear_q;
 
-            // Drive commands: front wheels haul forward, rear wheels climb wall
+            // Drive commands: front wheels pull forward strongly, rear wheels assist wall climbing
             wheel_override_mask_.fill(true);
             double pull_vx = 0.20;
-            wheel_speed_overrides_(FL) = pull_vx / 0.065;
-            wheel_speed_overrides_(FR) = pull_vx / 0.065;
+            wheel_speed_overrides_(FL) = pull_vx / params_.wheel_radius;
+            wheel_speed_overrides_(FR) = pull_vx / params_.wheel_radius;
             wheel_speed_overrides_(RL) = params_.rear_roll_speed;
             wheel_speed_overrides_(RR) = params_.rear_roll_speed;
             forward_vel_override_ = pull_vx;
 
-            // Clearance check:
-            // In Mode 1 (100mm): rear wheels climb by 100mm = rw, takes ~0.25s
-            // In Mode 2 (200mm): rear hip must clear curb edge (rear_hip_cleared == true or pitch levelled)
-            bool is_high_mode = (params_.climb_mode == ClimbMode::HIGH_200MM || params_.target_curb_height >= 0.18);
+            // Clearance check
             bool cleared = false;
-            if (is_high_mode) {
-                cleared = geometry.rear_hip_cleared || (geometry.nose_up_pitch <= 0.05 && state_timer_ >= 0.25);
+            if (params_.target_curb_height >= 0.15) {
+                cleared = geometry.rear_hip_cleared || (geometry.nose_up_pitch <= 0.05 && state_timer_ >= 0.40) || (state_timer_ >= 0.70);
             } else {
-                cleared = (geometry.rear_height >= 0.06) || geometry.rear_edge_crested || (state_timer_ >= 0.65);
+                cleared = (geometry.rear_height >= (params_.target_curb_height - 0.025)) || geometry.rear_edge_crested || (state_timer_ >= 0.60);
             }
 
-            if (cleared || state_timer_ >= 0.90) {
+            if (cleared || state_timer_ >= 0.95) {
                 transitionTo(ClimbState::REAR_CREST_FOLD);
             }
             break;
         }
 
         // ============================================================
-        // 4. REAR_CREST_FOLD (Stage R2): Rear hip cleared; fold rear legs smoothly onto plateau
+        // 4. REAR_CREST_FOLD: Rear hip cleared; fold rear legs smoothly onto plateau
         // ============================================================
         case ClimbState::REAR_CREST_FOLD: {
             wheel_override_mask_.fill(true);
             double advance_vx = 0.20;
-            wheel_speed_overrides_.setConstant(advance_vx / 0.065);
+            wheel_speed_overrides_.setConstant(advance_vx / params_.wheel_radius);
             forward_vel_override_ = advance_vx;
 
+            // Smoothly fold all legs toward nominal plateau cruising posture (FL/FR: +0.65, RL/RR: -0.65)
             override_mask_.fill(true);
-            ecc_overrides_(FL) = 2.80;
-            ecc_overrides_(FR) = 2.80;
             double progress = std::clamp(state_timer_ / 0.50, 0.0, 1.0);
-            double q_r = (1.0 - progress) * (-MIN_SINGULARITY_INCLINATION) + progress * (-2.80);
+            double nominal_f = 0.65;
+            double nominal_r = -0.65;
+            double q_f = (1.0 - progress) * front_target_angles_(0) + progress * nominal_f;
+            double q_r = (1.0 - progress) * (-front_target_angles_(0)) + progress * nominal_r;
+            ecc_overrides_(FL) = q_f;
+            ecc_overrides_(FR) = q_f;
             ecc_overrides_(RL) = q_r;
             ecc_overrides_(RR) = q_r;
 
             if (progress >= 1.0 || state_timer_ >= 0.60) {
+                travel_distance_ = 0.0;
                 transitionTo(ClimbState::REAR_PLACED);
             }
             break;
         }
 
         // ============================================================
-        // 5. REAR_PLACED: All wheels on plateau; brief settling advance then return to IDLE
+        // 5. REAR_PLACED: All wheels on plateau; advance 0.25m into plateau then return to IDLE
         // ============================================================
         case ClimbState::REAR_PLACED: {
+            // Settle in plateau cruising posture
             override_mask_.fill(true);
-            ecc_overrides_(FL) = 2.80;
-            ecc_overrides_(FR) = 2.80;
-            ecc_overrides_(RL) = -2.80;
-            ecc_overrides_(RR) = -2.80;
+            ecc_overrides_(FL) = 0.65;
+            ecc_overrides_(FR) = 0.65;
+            ecc_overrides_(RL) = -0.65;
+            ecc_overrides_(RR) = -0.65;
 
             forward_vel_override_ = params_.forward_drive_speed;
             wheel_override_mask_.fill(true);
-            wheel_speed_overrides_.setConstant(params_.forward_drive_speed / 0.065);
+            wheel_speed_overrides_.setConstant(params_.forward_drive_speed / params_.wheel_radius);
 
-            if (state_timer_ >= params_.settling_duration) {
+            double effective_vx = (std::abs(body_vx) > 0.02) ? std::abs(body_vx) : params_.forward_drive_speed;
+            travel_distance_ += effective_vx * dt;
+
+            // Advance by at least params_.settling_distance (0.25m) so rear wheels are deeply positioned on plateau
+            bool distance_settled = travel_distance_ >= params_.settling_distance;
+            bool time_settled = state_timer_ >= params_.settling_duration;
+
+            if (distance_settled || time_settled) {
                 blend_out_timer_ = 0.0;
                 blend_out_weight_ = 1.0;
                 cooldown_timer_ = params_.cooldown_duration;

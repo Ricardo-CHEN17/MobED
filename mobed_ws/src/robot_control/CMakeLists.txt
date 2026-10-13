@@ -48,11 +48,10 @@ target_include_directories(mobed_dynamics PUBLIC
 )
 target_include_directories(mobed_dynamics SYSTEM PUBLIC ${EIGEN3_INCLUDE_DIRS})
 
-# Tasks Library (FSM Climbing + Trajectory Generator + 200mm High Stair Controller)
+# Tasks Library (Unified Adaptive FSM Climbing + Trajectory Generator)
 add_library(mobed_tasks SHARED
   src/tasks/trajectory_generator.cpp
   src/tasks/task_controller.cpp
-  src/tasks/high_stair_controller.cpp
 )
 target_include_directories(mobed_tasks PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

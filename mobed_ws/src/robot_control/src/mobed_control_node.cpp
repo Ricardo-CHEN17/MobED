@@ -23,7 +23,6 @@
 
 // Tasks
 #include "robot_control/tasks/task_controller.hpp"
-#include "robot_control/tasks/high_stair_controller.hpp"
 
 using namespace std::chrono_literals;
 
@@ -53,7 +52,6 @@ public:
         climb_geometry_estimator_ = std::make_unique<estimation::ClimbGeometryEstimator>(robot_params_);
         task_controller_     = std::make_unique<tasks::TaskController>();
         task_controller_->setModeProfile(climb_mode_);
-        high_stair_controller_ = std::make_unique<tasks::HighStairController>();
 
         // ============================================================
         // Initialize state variables
@@ -115,7 +113,7 @@ public:
         sub_curb_height_ = this->create_subscription<std_msgs::msg::Float64>(
             "/mobed/curb_height", 10,
             [this](const std_msgs::msg::Float64::SharedPtr msg) {
-                double h = std::clamp(msg->data, 0.04, 0.15);
+                double h = std::clamp(msg->data, 0.04, 0.22);
                 RCLCPP_INFO(this->get_logger(), "Adaptive curb height updated: %.3f m", h);
                 task_controller_->setCurbHeight(h);
             });
@@ -159,14 +157,14 @@ public:
                 }
             });
 
-        // Climb Mode Guard: 1 = LOW_80MM, 2 = HIGH_200MM
+        // Climb Mode / Profile Subscription: 1 = ADAPTIVE / LOW_80MM, 2 = HIGH_200MM
         sub_climb_mode_ = this->create_subscription<std_msgs::msg::Int32>(
             "/mobed/climb_mode", 10,
             [this](const std_msgs::msg::Int32::SharedPtr msg) {
                 if (msg->data == 1 || msg->data == 2) {
                     auto new_mode = static_cast<ClimbMode>(msg->data);
                     if (new_mode != climb_mode_) {
-                        const char* mode_name = (new_mode == ClimbMode::LOW_80MM) ? "LOW_80MM" : "HIGH_200MM";
+                        const char* mode_name = (new_mode == ClimbMode::HIGH_200MM) ? "HIGH_200MM" : "ADAPTIVE";
                         RCLCPP_INFO(this->get_logger(), "Climb mode changed to: %s (%d)", mode_name, msg->data);
                         climb_mode_ = new_mode;
                         contact_detector_->reset();
@@ -174,20 +172,12 @@ public:
                         task_controller_->setModeProfile(climb_mode_);
                         state_estimator_->reset();
                         terrain_estimator_->reset();
-                        for (int i = 0; i < 4; ++i) {
-                            prev_cad_ecc_[i] = curr_ecc_angles_(i) * ecc_signs_[i] + ecc_offsets_[i];
-                        }
-                        if (climb_mode_ == ClimbMode::HIGH_200MM) {
-                            target_height_ = 0.22;
-                            transition_smoother_.start(curr_ecc_angles_, curr_wheel_velocities_, 1.0, 1.0, 0.25);
-                        } else {
-                            balance_controller_->syncCurrentAngles(curr_ecc_angles_);
-                            target_height_ = 0.205;
-                            transition_smoother_.start(curr_ecc_angles_, curr_wheel_velocities_, 1.0, 1.0, 0.25);
-                        }
+                        balance_controller_->syncCurrentAngles(curr_ecc_angles_);
+                        target_height_ = 0.205;
+                        transition_smoother_.start(curr_ecc_angles_, curr_wheel_velocities_, 1.0, 1.0, 0.25);
                     }
                 } else {
-                    RCLCPP_WARN(this->get_logger(), "Invalid climb mode: %d (1:LOW_80MM, 2:HIGH_200MM)", msg->data);
+                    RCLCPP_WARN(this->get_logger(), "Invalid climb mode: %d (1:ADAPTIVE, 2:HIGH_200MM)", msg->data);
                 }
             });
 
@@ -348,7 +338,6 @@ private:
         if (e_stop_active_) {
             RCLCPP_WARN(this->get_logger(), "EMERGENCY STOP ACTIVATED!");
             task_controller_->abort();
-            high_stair_controller_->abort();
             task_controller_->reset();
             contact_detector_->reset();
             climb_geometry_estimator_->reset();
@@ -481,11 +470,13 @@ private:
         // ============================================================
         if (!is_homing_ && !e_stop_active_) {
             // Forward Motion & Steering Inhibit Gate (Layer 2 Defense):
-            bool forward_straight_active = (cmd_vel_(0) > 0.05) &&
-                                           (std::abs(cmd_vel_(2)) < 0.60) &&
-                                           (std::abs(cmd_vel_(1)) < 0.15) &&
-                                           (std::abs(curr_steer_angles_(0)) < 0.52) &&
-                                           (std::abs(curr_steer_angles_(1)) < 0.52);
+            // Allow intentional forward approach (vx > 0.03) with reasonable oblique angles (|steer| < 0.85 rad ≈ 48°)
+            bool forward_intent = (cmd_vel_(0) > 0.03);
+            bool steer_aligned = (std::abs(curr_steer_angles_(0)) < 0.85) &&
+                                 (std::abs(curr_steer_angles_(1)) < 0.85);
+            bool forward_straight_active = forward_intent && steer_aligned &&
+                                           (std::abs(cmd_vel_(2)) < 0.80) &&
+                                           (std::abs(cmd_vel_(1)) < 0.25);
 
             bool fl_stalled = (std::abs(curr_wheel_efforts_(0)) > robot_params_.wheel_stall_torque_threshold) &&
                               (std::abs(curr_wheel_velocities_(0)) < robot_params_.wheel_stall_vel_threshold);
@@ -504,17 +495,17 @@ private:
 
             bool is_on_ramp = !front_wheel_stalled && (steady_ramp || transient_ramp);
 
-            bool obstacle_climb_permitted = forward_straight_active;
-            // Inhibit obstacle climbing when driving on steady or transient ramps without front wheel stall
-            if (is_on_ramp) {
-                obstacle_climb_permitted = false;
-            }
+            bool obstacle_climb_permitted = forward_straight_active && !is_on_ramp;
 
-            if (!task_controller_->isActive() && !obstacle_climb_permitted) {
+            // Only reset contact detector when explicitly reversing or driving backwards
+            if (!task_controller_->isActive() && cmd_vel_(0) < -0.05) {
                 contact_detector_->reset();
             }
-            task_controller_->update(
-                *contact_detector_, geom, curr_ecc_angles_, curr_ecc_efforts_, dt, chassis_forward_vel);
+
+            if (obstacle_climb_permitted || task_controller_->isActive()) {
+                task_controller_->update(
+                    *contact_detector_, geom, curr_ecc_angles_, curr_ecc_efforts_, dt, chassis_forward_vel);
+            }
         }
 
         // Log FSM state transitions with override mask info
@@ -544,52 +535,29 @@ private:
         Eigen::Vector4d target_ecc = Eigen::Vector4d::Zero();
         ControlOutput balance_out;
 
-        if (climb_mode_ == ClimbMode::HIGH_200MM) {
-            // Mode 2: High Stair 200mm assault state.
-            // Cruising stance: hold slight 7°~8° outward inclination (0.12 rad),
-            // giving ~219mm belly clearance while preserving a ~1.1cm impact lever arm
-            // to eliminate horizontal impact singularity and enable zero-delay collision detection.
-            // Once climbed onto 200mm plateau, hold the balanced post-climb stance (FL/FR: +2.80, RL/RR: -2.80).
-            if (task_controller_->hasClimbed()) {
-                target_ecc << 2.80, 2.80, -2.80, -2.80;
-            } else {
-                target_ecc << 0.12, 0.12, -0.12, -0.12;
-            }
-            balance_out.ecc_torques.setZero();
-            balance_out.ecc_angles = target_ecc;
-        } else {
-            // Mode 1: Nominal balanced cruising & 80mm obstacle crossing (37 deg outward stance)
-            // Once climbed onto 100mm curb, hold the plateau stance [2.80, 2.80, -2.80, -2.80]
-            if (task_controller_->hasClimbed()) {
-                target_ecc << 2.80, 2.80, -2.80, -2.80;
-                balance_out.ecc_torques.setZero();
-                balance_out.ecc_angles = target_ecc;
-            } else {
-                double active_height = is_homing_ ? 0.205 : target_height_;
-                double active_roll   = is_homing_ ? 0.0 : target_roll_;
-                double active_pitch  = is_homing_ ? 0.0 : target_pitch_;
+        double active_height = is_homing_ ? 0.205 : target_height_;
+        double active_roll   = is_homing_ ? 0.0 : target_roll_;
+        double active_pitch  = is_homing_ ? 0.0 : target_pitch_;
 
-                // Overlay bank angle from driving controller onto target roll
-                active_roll += driving_controller_->getBankAngle();
+        // Overlay bank angle from driving controller onto target roll
+        active_roll += driving_controller_->getBankAngle();
 
-                // Prepare terrain state for BalanceController:
-                // When climbing an obstacle, zero out longitudinal pitch slope compensation
-                TerrainState active_terrain_state = terrain_state;
-                if (task_controller_->isActive()) {
-                    active_terrain_state.pitch_slope = 0.0;
-                    active_terrain_state.rotation = Eigen::AngleAxisd(
-                        active_terrain_state.roll_slope, Eigen::Vector3d::UnitX()).toRotationMatrix();
-                }
-
-                // Call updateHybrid using contact points from Phase 2.5 and body_state from Phase 2
-                balance_out = balance_controller_->updateHybrid(
-                    active_height, active_roll, active_pitch,
-                    target_steer, curr_ecc_angles_, curr_ecc_efforts_, body_state,
-                    contact_points_world, contact_valid, active_terrain_state, dt, e_stop_active_, active_cmd_vel);
-
-                target_ecc = balance_out.ecc_angles;
-            }
+        // Prepare terrain state for BalanceController:
+        // When climbing an obstacle, zero out longitudinal pitch slope compensation
+        TerrainState active_terrain_state = terrain_state;
+        if (task_controller_->isActive()) {
+            active_terrain_state.pitch_slope = 0.0;
+            active_terrain_state.rotation = Eigen::AngleAxisd(
+                active_terrain_state.roll_slope, Eigen::Vector3d::UnitX()).toRotationMatrix();
         }
+
+        // Call updateHybrid using contact points from Phase 2.5 and body_state from Phase 2
+        balance_out = balance_controller_->updateHybrid(
+            active_height, active_roll, active_pitch,
+            target_steer, curr_ecc_angles_, curr_ecc_efforts_, body_state,
+            contact_points_world, contact_valid, active_terrain_state, dt, e_stop_active_, active_cmd_vel);
+
+        target_ecc = balance_out.ecc_angles;
 
         // ============================================================
         // Phase 7: FSM Override — replace specific legs if climbing
@@ -605,7 +573,7 @@ private:
                     target_ecc(i) = ecc_overrides_vec(i);
                 }
             }
-        } else if (blend_w > 0.0 && climb_mode_ != ClimbMode::HIGH_200MM) {
+        } else if (blend_w > 0.0) {
             for (int i = 0; i < NUM_LEGS; ++i) {
                 if (ecc_override_mask[i]) {
                     target_ecc(i) = blend_w * ecc_overrides_vec(i) + (1.0 - blend_w) * target_ecc(i);
@@ -702,7 +670,6 @@ private:
     std::unique_ptr<estimation::TerrainEstimator>     terrain_estimator_;
     std::unique_ptr<estimation::ContactDetector>      contact_detector_;
     std::unique_ptr<tasks::TaskController>            task_controller_;
-    std::unique_ptr<tasks::HighStairController>       high_stair_controller_;
     std::unique_ptr<estimation::ClimbGeometryEstimator> climb_geometry_estimator_;
 
     RobotParams robot_params_;

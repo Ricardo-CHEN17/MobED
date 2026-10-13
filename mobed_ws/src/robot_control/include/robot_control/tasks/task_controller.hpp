@@ -21,31 +21,34 @@ namespace tasks {
  *   REAR_PLACED → IDLE
  */
 enum class ClimbState {
-    IDLE,              // Normal driving, monitoring for front wheel impact / wall-roll
-    FRONT_WALL_CLIMB,  // Front wheels climb wall, eccentric arms fold with pitch feedback
-    FRONT_PLACED,      // Front wheels on top, full stride advance to bring rear to step
-    REAR_WALL_CLIMB,   // Stage R1: Rear legs locked at -0.12 rad, rear wheels climb wall
-    REAR_CREST_FOLD,   // Stage R2: Rear hip cleared, fold rear legs onto curb
-    REAR_PLACED,       // All wheels on top of curb, brief settle then release to IDLE
+    IDLE,               // Normal driving, monitoring for front wheel impact / wall-roll
+    FRONT_WALL_CLIMB,   // Front wheels climb wall, eccentric arms fold with pitch feedback
+    STRADDLE_LEVELING,  // Front wheels on curb, adaptive near-level differential stance (40mm~200mm)
+    FRONT_PLACED = STRADDLE_LEVELING, // Backward-compatible alias
+    REAR_WALL_CLIMB,    // Rear wheels climb wall with front wheel pulling assist
+    REAR_CREST_FOLD,    // Rear hip cleared, fold rear legs onto curb smoothly
+    REAR_PLACED,        // All wheels on top of curb, advance 0.25m into plateau then release to IDLE
 };
 
 /**
  * @brief Parameters for the climbing task controller.
  */
 struct TaskControllerParams {
-    double target_curb_height = 0.08;   // m (default 80mm adaptive mode)
+    double target_curb_height = 0.08;   // m (0.04m ~ 0.22m continuous adaptive range)
     double curb_margin = 0.015;          // m (clearance safety margin)
-    double wheelbase = 0.432;            // m (chassis wheelbase)
+    double wheelbase = 0.300;            // m (chassis wheelbase: 2 * length_x)
+    double wheel_radius = 0.100;         // m (MuJoCo calibrated wheel radius)
 
     // Mode Profile
-    ClimbMode climb_mode = ClimbMode::LOW_80MM;
+    ClimbMode climb_mode = ClimbMode::ADAPTIVE;
     double front_roll_speed = 2.5;       // rad/s (traction roll assist on front wheels)
     double rear_roll_speed = 2.5;        // rad/s (traction roll assist on rear wheels)
     bool active_pitch_counter_balance = true;
 
     // Durations & speeds
-    double forward_drive_speed = 0.25;   // m/s
-    double settling_duration = 0.20;     // s
+    double forward_drive_speed = 0.20;   // m/s
+    double settling_distance = 0.25;     // m (forward advance onto plateau before exiting FSM)
+    double settling_duration = 1.50;     // s (max settling duration guard)
     double blend_out_duration = 0.40;    // s
     double cooldown_duration = 1.0;      // s
 };
@@ -92,7 +95,7 @@ public:
             params_.rear_roll_speed = 2.5;
             params_.forward_drive_speed = 0.20;
         } else {
-            params_.target_curb_height = 0.10;
+            params_.target_curb_height = 0.08;
             params_.front_roll_speed = 2.5;
             params_.rear_roll_speed = 2.5;
             params_.forward_drive_speed = 0.20;
@@ -101,19 +104,29 @@ public:
     ClimbMode getModeProfile() const { return params_.climb_mode; }
 
     /**
-     * @brief Dynamically compute lift angle based on target curb height and starting posture.
-     * @param q_start Starting eccentric angle of the leg (rad)
-     * @return Required angular increment (rad)
+     * @brief Continuous analytical front target angle mapping (1.45 rad for 40mm up to 2.60 rad for 200mm).
+     * @param h_curb Curb height (m)
+     * @return Target eccentric angle for front legs (rad)
      */
-    double computeAdaptiveLiftAngle(double q_start) const;
+    double computeFrontTargetAngle(double h_curb) const;
 
     /**
-     * @brief Compute rear leg counter-balancing angle to keep chassis level while front legs are on the curb.
+     * @brief Backward-compatible alias for computeFrontTargetAngle.
+     */
+    double computeAdaptiveLiftAngle(double q_start = 0.0) const;
+
+    /**
+     * @brief Compute rear leg counter-balancing angle to keep chassis near-level with >20mm belly clearance.
      * @param q_front_avg Average eccentric angle of the front legs resting on the curb
      * @param h_curb Height of the curb (m)
      * @return Target eccentric angle for rear legs (rad)
      */
     double computeRearLevelingAngle(double q_front_avg, double h_curb) const;
+
+    /**
+     * @brief Reset lockout flag allowing immediate next climb without hard reboot.
+     */
+    void clearClimbedLock() { has_climbed_ = false; }
 
     /**
      * @brief Check if the task controller is actively overriding any leg.
