@@ -60,12 +60,16 @@ std::pair<double, double> DrivingController::optimizeSwerveModule(
     double s_B = kinematics_->normalize_angle(des_steer + M_PI);
     double v_B = -des_speed;
 
-    // Query 166-degree under-belly forbidden sector
+    // Safe Sector Check: evaluated against each leg's individual safe outward sector
     bool safe_A = !kinematics_->isSteerInForbiddenSector(leg_index, s_A);
     bool safe_B = !kinematics_->isSteerInForbiddenSector(leg_index, s_B);
 
-    double diff_A = std::abs(kinematics_->normalize_angle(s_A - curr_steer));
-    double diff_B = std::abs(kinematics_->normalize_angle(s_B - curr_steer));
+    auto cfg = kinematics_->getLegSafeSectorConfig(leg_index);
+    double u_curr = kinematics_->normalize_angle(curr_steer - cfg.center_angle);
+    double u_A    = kinematics_->normalize_angle(s_A - cfg.center_angle);
+    double u_B    = kinematics_->normalize_angle(s_B - cfg.center_angle);
+    double diff_A = std::abs(u_A - u_curr);
+    double diff_B = std::abs(u_B - u_curr);
 
     // Stance bias: slight preference for states closer to widest stance angle
     double opt_stance = kinematics_->getOptimalOutwardStanceAngle(leg_index);
@@ -75,7 +79,8 @@ std::pair<double, double> DrivingController::optimizeSwerveModule(
     std::pair<double, double> result;
 
     if (safe_A && safe_B) {
-        // Both safe: apply switching hysteresis to prevent 100 Hz chattering near 90 deg
+        // Both safe (typically around +-90 deg pure strafe boundary):
+        // Apply switching hysteresis to prevent chattering
         bool was_inverted = prev_swerve_inverted_[leg_index];
         double hyst = params_.swerve_invert_hysteresis; // ~0.175 rad (10 deg)
         
@@ -105,13 +110,20 @@ std::pair<double, double> DrivingController::optimizeSwerveModule(
         result = {s_A, v_A};
     } else if (safe_B) {
         // Active evasion: 180 deg inversion keeps wheel safely outward!
+        // For spin, FL/RL/FR/RR will reliably select this when direct target points inward.
         prev_swerve_inverted_[leg_index] = true;
         result = {s_B, v_B};
     } else {
-        // Edge case fallback: project A to nearest safe boundary outside forbidden sector
-        double safe_s = kinematics_->clampToSafeSteerSector(leg_index, s_A);
-        prev_swerve_inverted_[leg_index] = false;
-        result = {safe_s, 0.0};
+        // Fallback: when neither candidate is strictly within the safe sector (e.g. at transition boundaries),
+        // pick whichever candidate is closer to the safe sector center, clamp it to the safe boundary,
+        // and project the drive velocity onto the clamped heading rather than zeroing it out.
+        bool choose_B = (std::abs(u_B) < std::abs(u_A));
+        double target_s = choose_B ? s_B : s_A;
+        double base_v   = choose_B ? v_B : v_A;
+        double safe_s   = kinematics_->clampToSafeSteerSector(leg_index, target_s);
+        double v_proj   = base_v * std::cos(safe_s - target_s);
+        prev_swerve_inverted_[leg_index] = choose_B;
+        result = {safe_s, v_proj};
     }
 
     return result;
@@ -120,26 +132,22 @@ std::pair<double, double> DrivingController::optimizeSwerveModule(
 double DrivingController::enforceForbiddenSectorTransit(
     int leg_index, double prev_s, double opt_s, double max_delta) const {
 
-    // 1. Ensure both boundary endpoints are outside the forbidden sector
+    // 1. Both endpoints are strictly confined inside this leg's safe outward sector
     opt_s  = kinematics_->clampToSafeSteerSector(leg_index, opt_s);
     prev_s = kinematics_->clampToSafeSteerSector(leg_index, prev_s);
 
-    auto sector = kinematics_->getForbiddenSteerSectorInfo(leg_index);
-    double delta = kinematics_->normalize_angle(opt_s - prev_s);
-    double d_center = kinematics_->normalize_angle(sector.center_angle - prev_s);
+    // 2. Continuous 1D monotonic transit in unwrapped safe coordinate centered at cfg.center_angle.
+    // In this coordinate frame, the safe sector is [-half_width, +half_width], which is strictly convex.
+    // Stepping between any two points is guaranteed to stay within the safe sector and never cross into the forbidden zone.
+    auto cfg = kinematics_->getLegSafeSectorConfig(leg_index);
+    double u_opt  = kinematics_->normalize_angle(opt_s - cfg.center_angle);
+    double u_prev = kinematics_->normalize_angle(prev_s - cfg.center_angle);
+    double delta  = u_opt - u_prev;
+    double step   = std::clamp(delta, -max_delta, max_delta);
+    double u_next = u_prev + step;
+    double next_s = kinematics_->normalize_angle(cfg.center_angle + u_next);
 
-    // 2. Check if direct circular delta would travel through the forbidden center
-    if ((delta > 0.0 && d_center > 0.0 && d_center < delta) ||
-        (delta < 0.0 && d_center < 0.0 && d_center > delta)) {
-        // Reverse direction: step around the safe outward arc!
-        delta -= (delta > 0.0 ? 1.0 : -1.0) * (2.0 * M_PI);
-    }
-
-    // 3. Monotonic rate limiting
-    double step = std::clamp(delta, -max_delta, max_delta);
-    double next_s = kinematics_->normalize_angle(prev_s + step);
-
-    // 4. Guaranteed barrier defense: clamp to safe sector
+    // 3. Guaranteed barrier defense: clamp to safe sector
     return kinematics_->clampToSafeSteerSector(leg_index, next_s);
 }
 
@@ -234,6 +242,43 @@ std::tuple<Eigen::Vector4d, Eigen::Vector4d> DrivingController::update(
             align_to_neutral);
         opt_steer(i) = s;
         opt_speed(i) = w;
+    }
+
+    // ============================================================
+    // 3.5 Ground Traction Vector Projection & Alignment
+    // Industry standard practice (NASA/Hyundai e-Corner/Swerve Drive):
+    // Computes drive speed via dot product projection: v_module = (v_contact · u_hat) / r_wheel
+    // Ensures that for any module heading, the contact point push vector strictly aligns
+    // with the commanded body velocity, completely eliminating opposing front/rear wheel forces.
+    // ============================================================
+    if (active_cmd.norm() >= 1e-3) {
+        double r_w = kinematics_->getParams().r_wheel;
+        if (r_w < 1e-4) r_w = 0.10;
+
+        for (int i = 0; i < 4; ++i) {
+            Eigen::Vector3d B_r_i = kinematics_->computeFootPositionInBase(i, opt_steer(i), current_ecc_angles(i));
+            double v_ix = active_cmd.x() - active_cmd.z() * B_r_i.y();
+            double v_iy = active_cmd.y() + active_cmd.z() * B_r_i.x();
+
+            double u_x = std::cos(opt_steer(i));
+            double u_y = std::sin(opt_steer(i));
+            double v_dot = (v_ix * u_x + v_iy * u_y) / r_w;
+
+            // Lateral strafe traction alignment:
+            // Ensure the lateral traction component (v_module * sin(theta_steer)) strictly matches
+            // the commanded lateral direction sign(active_cmd.y()).
+            if (std::abs(active_cmd.y()) > 1e-3 && std::abs(u_y) > 0.1) {
+                double sign_cmd_y = (active_cmd.y() >= 0.0) ? 1.0 : -1.0;
+                double sign_steer_y = (u_y >= 0.0) ? 1.0 : -1.0;
+                // Base-frame lateral push on chassis is: F_y ~ v_wheel * sin(theta_steer).
+                // To guarantee F_y has sign_cmd_y: v_wheel must have sign (sign_cmd_y * sign_steer_y).
+                double desired_sign = sign_cmd_y * sign_steer_y;
+                double speed_mag = std::abs(v_dot) > 1e-4 ? std::abs(v_dot) : std::abs(opt_speed(i));
+                v_dot = speed_mag * desired_sign;
+            }
+
+            opt_speed(i) = v_dot;
+        }
     }
 
     // ============================================================

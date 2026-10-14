@@ -47,8 +47,9 @@ class UdpInterfaceNode(Node):
         self.sock.bind(('0.0.0.0', 9001))
         self.sock.setblocking(False)
 
-        # Target: Mac host from inside Docker
-        self.mac_addr = ('host.docker.internal', 9000)
+        # Target: Mac host from inside Docker (default 9004 to avoid Docker Desktop Mac proxy conflict on 9000)
+        self.mac_port = 9004
+        self.mac_addr = ('host.docker.internal', self.mac_port)
 
         # ---------- ROS2 pub / sub ----------
         self.pub_states = self.create_publisher(JointState, '/joint_states', 10)
@@ -134,11 +135,17 @@ class UdpInterfaceNode(Node):
         while True:
             try:
                 data, addr = self.sock.recvfrom(4096)
-                if addr and addr[0] == '127.0.0.1':
-                    self.mac_addr = addr
-                else:
-                    self.mac_addr = ('host.docker.internal', 9000)
+                if addr:
+                    target_ip = '127.0.0.1' if addr[0] in ['127.0.0.1', 'localhost'] else 'host.docker.internal'
+                    self.mac_addr = (target_ip, self.mac_port)
+                self.get_logger().info(f'UDP RECV {len(data)} bytes from {addr}', throttle_duration_sec=1.0)
                 parsed = json.loads(data.decode('utf-8'))
+                if 'port' in parsed:
+                    try:
+                        self.mac_port = int(parsed['port'])
+                        self.mac_addr = (self.mac_addr[0], self.mac_port)
+                    except (ValueError, TypeError):
+                        pass
                 if 'state' in parsed and len(parsed['state']) == 12:
                     latest_state = parsed['state']
                 if 'velocity' in parsed and len(parsed['velocity']) == 12:

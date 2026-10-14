@@ -88,6 +88,26 @@ public:
     double getFrontEvidenceScore() const { return front_evidence_score_; }
 
     /**
+     * @brief Get the generalized momentum observer residual r(t) (N).
+     * Strong negative values indicate sudden physical arrest of chassis momentum.
+     */
+    double getMomentumResidual() const { return momentum_residual_; }
+
+    /**
+     * @brief Get the eccentric reaction torque jump (Nm).
+     */
+    Eigen::Vector4d getDeltaTauEcc() const { return delta_tau_ecc_; }
+
+    /**
+     * @brief Check if a specific swing leg has established firm touchdown onto the plateau.
+     * Verified by eccentric reaction torque jump >= 2.0 Nm sustained for >= 30ms.
+     */
+    bool isLegTouchdown(int leg_index) const {
+        if (leg_index < 0 || leg_index >= NUM_LEGS) return false;
+        return leg_touchdown_timers_[leg_index] >= 0.030;
+    }
+
+    /**
      * @brief Reset all detection state and history buffers.
      */
     void reset();
@@ -107,9 +127,25 @@ private:
     double front_evidence_sustain_timer_ = 0.0;
     double prev_cmd_vel_ = 0.0;
 
+    // Consistency Gate Thresholds and Filters
+    double imu_decel_shock_threshold_ = -0.75;  // m/s^2, longitudinal impact shock
+    double wheel_stall_vel_max_       = 0.8;    // rad/s, maximum wheel speed during true stall
+    double wheel_stall_torque_min_    = 2.2;    // N·m, minimum reaction torque during stall (scaled with command)
+    int    impact_confirm_cycles_     = 0;      // Consecutive confirmation cycles
+    static constexpr int REQUIRED_CONFIRM_CYCLES = 3; // 3 cycles (30ms at 100Hz)
+
+    // Generalized Momentum Observer & Fast Reaction Jump for rear wall collision
+    double momentum_residual_ = 0.0;
+    double momentum_observer_z_ = 0.0;
+    int    rear_impact_confirm_cycles_ = 0;
+    static constexpr int REQUIRED_REAR_CONFIRM_CYCLES = 3; // 3 cycles (30ms at 100Hz)
+    Eigen::Vector4d delta_tau_ecc_ = Eigen::Vector4d::Zero();
+    Eigen::Vector4d ecc_effort_baseline_ = Eigen::Vector4d::Zero();
+
     // Two-stage detection timers per leg
     std::array<double, NUM_LEGS> shock_window_timer_;
     std::array<double, NUM_LEGS> sustain_timer_;
+    std::array<double, NUM_LEGS> leg_touchdown_timers_ = {0.0, 0.0, 0.0, 0.0};
     double startup_timer_ = 0.0;
 
     // Sliding window history for torque derivative computation

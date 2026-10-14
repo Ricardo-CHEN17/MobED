@@ -26,6 +26,13 @@ struct ClimbGeometry {
     bool front_edge_crested = false; // Front wheels crested curb edge and transitioned to rolling
     bool rear_hip_cleared = false;   // Rear hip higher than step edge (+ margin)
     bool rear_edge_crested = false;  // Rear wheels crested curb edge and transitioned to rolling
+    double latched_curb_height = 0.08; // Auto-latched physical curb height (m)
+    bool has_latched_height = false;   // True once front cresting locks the physical height
+    double travel_distance = 0.0;        // Accumulated forward travel distance onto plateau (m)
+    double rear_slip_ratio = 0.0;        // Rear drive wheel slip ratio [0.0, 1.0]
+    double belly_clearance_margin = 0.0; // Estimated clearance between chassis bottom and curb edge (m)
+    bool gate_swing_permitted = false;   // True if rear hip is sufficiently high for swing leg to clear curb
+    double stability_margin_y = 0.0;     // Lateral stability margin (m)
 };
 
 /**
@@ -60,15 +67,26 @@ public:
     }
 
     const ClimbGeometry& getGeometry() const { return geometry_; }
+    bool hasLatchedHeight() const { return height_latched_; }
+    double getLatchedHeight() const { return latched_curb_height_; }
+    void unlatchHeight() { height_latched_ = false; }
     void reset();
 
 private:
     RobotParams params_;
     ClimbGeometry geometry_;
 
+    double latched_curb_height_ = 0.08;
+    bool height_latched_ = false;
+
     double filtered_delta_height_ = 0.0;
     double front_crest_timer_ = 0.0;
     double rear_crest_timer_ = 0.0;
+    double ground_baseline_z_ = 0.0;
+    bool baseline_initialized_ = false;
+
+    double travel_distance_ = 0.0;
+    double rear_slip_ratio_ = 0.0;
 };
 
 }  // namespace estimation

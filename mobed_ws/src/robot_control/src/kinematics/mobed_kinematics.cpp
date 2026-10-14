@@ -129,6 +129,11 @@ Eigen::Vector4d MobedKinematics::computePostureIK(
         } else if (config == PostureConfiguration::SPIN) {
             // Tangential alignment for in-place spin (Section II.B & Fig 5a 2)
             target_positive = (i == FL || i == RL);
+        } else if (config == PostureConfiguration::STRAFE_OUTWARD) {
+            // Lateral strafe wide stance (外八字):
+            // When wheels are steered sideways (FL/RR: -90 deg, FR/RL: +90 deg),
+            // front ecc < 0 and rear ecc > 0 flares wheels outwards to track width 391mm
+            target_positive = !is_front;
         }
 
         double q_ecc;
@@ -167,54 +172,58 @@ Eigen::Vector3d MobedKinematics::computeFootPositionInBase(
     );
 }
 
-MobedKinematics::SteerForbiddenSector MobedKinematics::getForbiddenSteerSectorInfo(int leg_index) const {
-    // 166-degree under-belly / narrow-track forbidden sector
-    // FL (0) & RR (3): dangerous inward swing centers at -2.539 rad (-145.5 deg)
-    // FR (1) & RL (2): dangerous inward swing centers at +2.539 rad (+145.5 deg)
-    // Half width is 1.449 rad (83.0 deg), covering a total under-belly collapse span of 166 deg
-    SteerForbiddenSector sector;
-    sector.half_width = 1.449;
-    sector.active = true;
+MobedKinematics::SteerSectorConfig MobedKinematics::getLegSafeSectorConfig(int leg_index) const {
+    SteerSectorConfig cfg;
+    // Reflects CAD coordinate mirror symmetry between left legs (FL, RL) and right legs (FR, RR):
+    // For lateral strafe, wheels must flare outwards away from each other along X:
+    // FL: steer to -90 deg (swings forward, X=+0.217m) -> center = -20 deg (-0.349 rad)
+    // FR: steer to +90 deg (swings forward, X=+0.217m) -> center = +20 deg (+0.349 rad)
+    // RL: steer to +90 deg (swings rearward, X=-0.213m) -> center = +20 deg (+0.349 rad)
+    // RR: steer to -90 deg (swings rearward, X=-0.213m) -> center = -20 deg (-0.349 rad)
+    // Safe half-width = 72 deg (1.257 rad), giving safe sector span [-92 deg, +52 deg] or [-52 deg, +92 deg].
+    // This expands wheelbase to 430mm on both flanks, completely eliminating wheel-wheel collision during strafe.
     if (leg_index == FL || leg_index == RR) {
-        sector.center_angle = -2.539;
+        cfg.center_angle = -0.349066; // -20 deg (-0.349 rad)
+        cfg.half_width   = 1.256637;  // 72 deg (1.257 rad)
     } else {
-        sector.center_angle = 2.539;
+        cfg.center_angle = 0.349066;  // +20 deg (+0.349 rad)
+        cfg.half_width   = 1.256637;  // 72 deg (1.257 rad)
     }
+    return cfg;
+}
+
+MobedKinematics::SteerForbiddenSector MobedKinematics::getForbiddenSteerSectorInfo(int leg_index) const {
+    auto cfg = getLegSafeSectorConfig(leg_index);
+    SteerForbiddenSector sector;
+    sector.center_angle = normalize_angle(cfg.center_angle + M_PI);
+    sector.half_width   = M_PI - cfg.half_width;
+    sector.active       = true;
     return sector;
 }
 
 bool MobedKinematics::isSteerInForbiddenSector(int leg_index, double steer_angle, double margin) const {
-    auto sector = getForbiddenSteerSectorInfo(leg_index);
-    if (!sector.active) return false;
-    double dist = std::abs(normalize_angle(steer_angle - sector.center_angle));
-    return dist < (sector.half_width + margin);
+    auto cfg = getLegSafeSectorConfig(leg_index);
+    double dist = std::abs(normalize_angle(steer_angle - cfg.center_angle));
+    return dist > (cfg.half_width - margin);
 }
 
 double MobedKinematics::clampToSafeSteerSector(int leg_index, double steer_angle, double margin) const {
-    auto sector = getForbiddenSteerSectorInfo(leg_index);
-    if (!sector.active) return normalize_angle(steer_angle);
-    double delta = normalize_angle(steer_angle - sector.center_angle);
-    double dist = std::abs(delta);
-    double limit = sector.half_width + margin;
-    if (dist < limit) {
-        // Project to nearest safe boundary outside the forbidden sector
-        double sgn = (delta >= 0.0) ? 1.0 : -1.0;
-        return normalize_angle(sector.center_angle + sgn * limit);
-    }
-    return normalize_angle(steer_angle);
+    auto cfg = getLegSafeSectorConfig(leg_index);
+    double delta = normalize_angle(steer_angle - cfg.center_angle);
+    double limit = cfg.half_width - margin;
+    double clamped_delta = std::clamp(delta, -limit, limit);
+    return normalize_angle(cfg.center_angle + clamped_delta);
 }
 
 double MobedKinematics::getOptimalOutwardStanceAngle(int leg_index) const {
-    // Widest track width stance (|Y| = 0.229m):
-    // FL (0) & RR (3): +35 deg (+0.61 rad)
-    // FR (1) & RL (2): -35 deg (-0.61 rad)
-    return (leg_index == FL || leg_index == RR) ? 0.61 : -0.61;
+    // Widest track width stance (|Y| = 0.178m ~ 0.229m):
+    // FL (0) & RR (3): -35 deg (-0.61 rad)
+    // FR (1) & RL (2): +35 deg (+0.61 rad)
+    return (leg_index == FL || leg_index == RR) ? -0.61 : 0.61;
 }
 
-std::pair<double, double> MobedKinematics::getForbiddenSteerSector(int leg_index, double /*q_ecc*/) const {
-    auto sector = getForbiddenSteerSectorInfo(leg_index);
-    return {normalize_angle(sector.center_angle - sector.half_width),
-            normalize_angle(sector.center_angle + sector.half_width)};
+std::pair<double, double> MobedKinematics::getForbiddenSteerSector(int /*leg_index*/, double /*q_ecc*/) const {
+    return {MAX_SAFE_STEER_ANGLE, -MAX_SAFE_STEER_ANGLE};
 }
 
 } // namespace kinematics

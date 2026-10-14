@@ -32,7 +32,7 @@ import argparse
 PLAYGROUND_XML = 'local_mtgvakn0_9w389c_mjcf_stl/robot_playground.xml'
 FLAT_XML = 'local_mtgvakn0_9w389c_mjcf_stl/robot.xml'
 RMUC_XML = 'local_mtgvakn0_9w389c_mjcf_stl/rmuc2026/robot_rmuc2026.xml'
-UDP_PORT = 9000           # Docker communication port
+UDP_PORT = 9004           # Docker communication port (9004 avoids Docker Desktop host proxy collision on 9000)
 TELEOP_UDP_PORT = 9002    # Local teleop GUI listener port
 TELEMETRY_PORT = 9003     # Telemetry target port for mac_teleop_gui.py
 
@@ -68,7 +68,7 @@ def get_joint_efforts(model, data):
 
 
 class SimTeleopBridge:
-    """Bridges commands from the external floating teleop dashboard (mac_teleop_gui.py)."""
+    """Bridges commands from local viewer keyboard or external floating dashboard (mac_teleop_gui.py)."""
     def __init__(self):
         # Commanded values
         self.vx = 0.0
@@ -83,8 +83,71 @@ class SimTeleopBridge:
         self.e_stop = False
 
         self.last_update_time = 0.0
-        self.is_connected = False
+        self.last_key_press_time = 0.0
+        self.is_gui_connected = False
         self.last_hud_render = 0.0
+
+    def on_key(self, keycode: int):
+        """Direct keyboard control within MuJoCo 3D window."""
+        self.last_key_press_time = time.time()
+        lin_speed = 0.5
+        ang_speed = 1.0
+
+        # W, S, Up, Down (longitudinal drive)
+        if keycode in (ord('W'), ord('w'), 265):
+            self.vx = lin_speed
+        elif keycode in (ord('S'), ord('s'), 264):
+            self.vx = -lin_speed
+        # A, D, Left, Right (turning / wz)
+        elif keycode in (ord('A'), ord('a'), 263):
+            self.wz = ang_speed
+        elif keycode in (ord('D'), ord('d'), 262):
+            self.wz = -ang_speed
+        # Q, E (pure in-place spin)
+        elif keycode in (ord('Q'), ord('q')):
+            self.vx = 0.0
+            self.vy = 0.0
+            self.wz = ang_speed
+        elif keycode in (ord('E'), ord('e')):
+            self.vx = 0.0
+            self.vy = 0.0
+            self.wz = -ang_speed
+        # Z, C (lateral strafe)
+        elif keycode in (ord('Z'), ord('z')):
+            self.vy = lin_speed
+        elif keycode in (ord('C'), ord('c')):
+            self.vy = -lin_speed
+        # Space, X (stop / brake)
+        elif keycode in (ord('X'), ord('x'), 32):
+            self.vx = 0.0
+            self.vy = 0.0
+            self.wz = 0.0
+        # Posture modes (7: Outward, 8: Inward, 9: Spin)
+        elif keycode == ord('7'):
+            self.posture_mode = 0
+        elif keycode == ord('8'):
+            self.posture_mode = 1
+        elif keycode == ord('9'):
+            self.posture_mode = 2
+        # Curb height adjustments
+        elif keycode in (ord('['), ord('{')):
+            self.curb_height = max(0.04, round(self.curb_height - 0.01, 3))
+        elif keycode in (ord(']'), ord('}')):
+            self.curb_height = min(0.20, round(self.curb_height + 0.01, 3))
+        # Climb mode toggle
+        elif keycode in (ord('\\'), ord('|')):
+            self.climb_mode = 1 if self.climb_mode != 1 else 0
+
+    def tick_watchdog(self):
+        """Decay velocities when local keyboard is released and no GUI is streaming."""
+        now = time.time()
+        gui_active = (now - self.last_update_time < 0.5)
+        if not gui_active:
+            # If controlled via direct keyboard in window, decay velocity if no key pressed in 0.45s
+            if now - self.last_key_press_time > 0.45:
+                self.vx = 0.0
+                self.vy = 0.0
+                self.wz = 0.0
 
     def update_from_dict(self, t: dict):
         """Update teleop states from received UDP packet."""
@@ -100,12 +163,12 @@ class SimTeleopBridge:
         self.e_stop = bool(t.get('e_stop', self.e_stop))
 
         self.last_update_time = time.time()
-        self.is_connected = True
+        self.is_gui_connected = True
 
     def check_connection(self):
-        if time.time() - self.last_update_time > 1.5:
-            self.is_connected = False
-        return self.is_connected
+        gui_connected = (time.time() - self.last_update_time <= 1.5)
+        kbd_active = (time.time() - self.last_key_press_time <= 2.0)
+        return gui_connected or kbd_active
 
     def render_hud(self, viewer):
         """Render clean, non-intrusive status overlay in MuJoCo viewer."""
@@ -114,11 +177,11 @@ class SimTeleopBridge:
             return
         self.last_hud_render = now
 
-        connected = self.check_connection()
-        posture_names = {0: "OUTWARD (432mm)", 1: "INWARD (167mm)", 2: "SPIN (0-radius)"}
+        gui_connected = (now - self.last_update_time <= 1.5)
+        posture_names = {0: "OUTWARD (432mm)", 1: "INWARD (167mm)", 2: "SPIN (0-radius)", 3: "STRAFE_OUTWARD (391mm)"}
         climb_names = {0: "DISABLED", 1: "ADAPTIVE", 2: "ADAPTIVE"}
 
-        status_text = "● GUI CONNECTED" if connected else "○ WAITING FOR GUI (mac_teleop_gui.py)"
+        status_text = "● GUI CONNECTED" if gui_connected else "● DIRECT KEYBOARD ACTIVE"
 
         left_col = (
             "--- MobED Sim HUD ---\n"
@@ -134,7 +197,7 @@ class SimTeleopBridge:
             f"{status_text}\n"
             f"Vx={self.vx:+.2f} m/s, Wz={self.wz:+.2f} rad/s\n"
             f"H={self.height*1000:.0f}mm | {posture_names.get(self.posture_mode, 'UNKNOWN')}\n"
-            f"{self.curb_height*1000:.0f}mm | CLIMB: {climb_names.get(self.climb_mode, 'ADAPTIVE')}\n"
+            f"{self.curb_height*1000:.0f}mm (Auto) | CLIMB: {climb_names.get(self.climb_mode, 'ADAPTIVE')}\n"
             f"{'LOCKED (E-STOP)' if self.e_stop else 'READY'}"
         )
 
@@ -169,11 +232,21 @@ def main():
     parser.add_argument('--model', type=str, default=None, help='Custom MJCF model path')
     parser.add_argument('--keyframe', type=str, default='home',
                         help='Initial spawn keyframe (home, home_red, home_blue, test_bumps, test_slope_23, test_bunker, test_flyslope)')
+    parser.add_argument('--port', type=int, default=UDP_PORT,
+                        help=f'UDP port to listen for commands from Docker (default: {UDP_PORT})')
     args = parser.parse_args()
 
     teleop_bridge = SimTeleopBridge()
-    print('MuJoCo Passive 3D Simulation initialized (zero key conflicts).')
-    print('Launch mac_teleop_gui.py in another terminal for floating control dashboard.')
+    print('MuJoCo Passive 3D Simulation initialized.')
+    print('Keyboard Controls (Direct Viewer Window):')
+    print('  [W / S / Up / Down]    Drive Forward / Backward')
+    print('  [A / D / Left / Right] Steer Left / Right')
+    print('  [Q / E]                In-place Spin CCW / CW')
+    print('  [Z / C]                Lateral Strafe Left / Right')
+    print('  [Space / X]            Stop / Brake')
+    print('  [7 / 8 / 9]            Posture: Outward / Inward / Spin')
+    print('  [ [ / ] ]              Curb Target Height Decrease / Increase')
+    print('  (Optional: Launch mac_teleop_gui.py in another terminal for floating HUD)')
 
     if args.model:
         xml_path = args.model
@@ -212,9 +285,21 @@ def main():
 
     # ---- UDP socket for Docker ROS2 ----
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind(('0.0.0.0', UDP_PORT))
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    if hasattr(socket, 'SO_REUSEPORT'):
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+    listen_port = args.port
+    try:
+        sock.bind(('0.0.0.0', listen_port))
+    except OSError as e:
+        if listen_port == 9000:
+            print("Port 9000 in use (Docker proxy conflict), falling back to 9004...")
+            listen_port = 9004
+            sock.bind(('0.0.0.0', listen_port))
+        else:
+            raise e
     sock.setblocking(False)
-    print(f'Docker UDP listening on :{UDP_PORT}')
+    print(f'Docker UDP listening on :{listen_port}')
 
     # ---- UDP socket for local Teleop GUI ----
     teleop_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -225,13 +310,15 @@ def main():
     except OSError as e:
         print(f'Warning: could not bind teleop port {TELEOP_UDP_PORT}: {e}')
 
-    docker_addr = None
+    docker_addr = ('127.0.0.1', 9001)
     last_telemetry_time = 0.0
 
-    # ---- Launch passive viewer WITHOUT conflicting key_callback ----
+    # ---- Launch passive viewer WITH direct keyboard control ----
     print('Starting MuJoCo viewer …')
-    with mujoco.viewer.launch_passive(model, data) as viewer:
+    with mujoco.viewer.launch_passive(model, data, key_callback=teleop_bridge.on_key) as viewer:
         last_render = time.time()
+        last_sim_time = time.perf_counter()
+        sim_time_debt = 0.0
 
         # Focus viewer camera directly on robot chassis with auto-tracking so it is immediately visible
         chassis_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, 'chassis')
@@ -243,8 +330,8 @@ def main():
             viewer.cam.azimuth = 145
 
         while viewer.is_running():
-            step_start = time.time()
-
+            # Watchdog decay for direct keyboard teleop
+            teleop_bridge.tick_watchdog()
             # ---- Receive teleop commands from mac_teleop_gui ----
             try:
                 ready_t, _, _ = select.select([teleop_sock], [], [], 0.0)
@@ -287,8 +374,17 @@ def main():
             if blue_op != -1:
                 data.qvel[model.jnt_dofadr[blue_op]] = -0.4
 
-            # ---- Step physics ----
-            mujoco.mj_step(model, data)
+            # ---- Step physics (Substepping Accumulator for 1:1 real-time sync) ----
+            now_perf = time.perf_counter()
+            dt_wall = min(now_perf - last_sim_time, 0.05)  # Cap at 50ms to prevent spiral of death
+            last_sim_time = now_perf
+            sim_time_debt += dt_wall
+
+            step_count = 0
+            while sim_time_debt >= model.opt.timestep and step_count < 25:
+                mujoco.mj_step(model, data)
+                sim_time_debt -= model.opt.timestep
+                step_count += 1
 
             # ---- Send state back to Docker ----
             chassis_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, 'chassis')
@@ -318,6 +414,7 @@ def main():
                         'effort':   state_eff,   # actuator forces  [12]
                         'imu':      imu_data,
                         'teleop':   teleop_bridge.get_teleop_dict(),
+                        'port':     listen_port,
                     }
                     sock.sendto(json.dumps(payload).encode('utf-8'), docker_addr)
                 except Exception:
@@ -355,11 +452,9 @@ def main():
                 viewer.sync()
                 last_render = now
 
-            # ---- Real-time pacing ----
-            elapsed = time.time() - step_start
-            sleep_time = model.opt.timestep - elapsed
-            if sleep_time > 0:
-                time.sleep(sleep_time)
+            # Yield briefly if ahead of real-time to prevent 100% CPU busy spin
+            if sim_time_debt < model.opt.timestep:
+                time.sleep(0.0005)
 
 
 if __name__ == '__main__':

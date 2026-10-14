@@ -23,6 +23,13 @@ void ContactDetector::reset() {
     wheel_torque_rates_ = Eigen::Vector4d::Zero();
     prev_ecc_efforts_ = Eigen::Vector4d::Zero();
     prev_wheel_efforts_ = Eigen::Vector4d::Zero();
+    ecc_effort_baseline_ = Eigen::Vector4d::Zero();
+    delta_tau_ecc_ = Eigen::Vector4d::Zero();
+    momentum_residual_ = 0.0;
+    momentum_observer_z_ = 0.0;
+    rear_impact_confirm_cycles_ = 0;
+    impact_confirm_cycles_ = 0;
+    leg_touchdown_timers_.fill(0.0);
     initialized_ = false;
 
     for (int i = 0; i < NUM_LEGS; ++i) {
@@ -71,6 +78,9 @@ void ContactDetector::update(
         prev_ecc_efforts_ = ecc_efforts;
         prev_wheel_efforts_ = wheel_efforts;
         prev_cmd_vel_ = cmd_forward_vel;
+        ecc_effort_baseline_ = ecc_efforts;
+        momentum_observer_z_ = params_.total_mass * chassis_forward_vel;
+        momentum_residual_ = 0.0;
         initialized_ = true;
         startup_timer_ = 0.0;
         front_evidence_score_ = 0.0;
@@ -86,8 +96,8 @@ void ContactDetector::update(
     prev_cmd_vel_ = cmd_forward_vel;
     bool manual_accel_transient = (cmd_accel > 0.40);
 
-    // Forward command gate: only check impact when driving forward
-    bool forward_cmd_active = (cmd_forward_vel > 0.05);
+    // Forward command gate: only check impact when driving forward with intentional speed
+    bool forward_cmd_active = (cmd_forward_vel > 0.08);
 
     // Startup window tracking to eliminate false alarms during initial acceleration from rest
     if (forward_cmd_active) {
@@ -96,92 +106,92 @@ void ContactDetector::update(
         startup_timer_ = 0.0;
     }
 
-    bool in_startup_phase = (startup_timer_ < 0.35) && (std::abs(geometry.delta_height) < 0.035);
+    // Startup acceleration blanking window:
+    // Inhibit impact detection during initial startup/acceleration from rest (first 0.5s)
+    // or during aggressive throttle ramping to completely eliminate false positives.
+    if (startup_timer_ < 0.50 || manual_accel_transient) {
+        front_evidence_score_ = 0.0;
+        front_evidence_sustain_timer_ = 0.0;
+        impact_confirm_cycles_ = 0;
+        impact_flags_.fill(false);
+        prev_ecc_efforts_ = ecc_efforts;
+        prev_wheel_efforts_ = wheel_efforts;
+        return;
+    }
 
-    // Chassis blockage gate:
-    // A true obstacle physically halts forward progress (vx < chassis_blocked_vel_threshold)
-    bool chassis_blocked = forward_cmd_active && !in_startup_phase &&
-                           (chassis_forward_vel < params_.chassis_blocked_vel_threshold);
-
-    // Update derivatives and per-wheel torque rates
+    // Update derivatives, per-wheel torque rates, and eccentric baseline
     for (int i = 0; i < NUM_LEGS; ++i) {
         ecc_torque_rates_(i) = computeSmoothedRate(
             ecc_effort_history_[i], ecc_efforts(i), dt);
         wheel_torque_rates_(i) = computeSmoothedRate(
             wheel_effort_history_[i], wheel_efforts(i), dt);
+
+        delta_tau_ecc_(i) = ecc_efforts(i) - ecc_effort_baseline_(i);
+        double alpha_ecc = std::clamp(dt / (dt + 0.40), 0.0, 1.0);
+        ecc_effort_baseline_(i) += alpha_ecc * (ecc_efforts(i) - ecc_effort_baseline_(i));
     }
 
-    // 1. Per-wheel stall checks
-    bool fl_stalled = (std::abs(wheel_efforts(FL)) > params_.wheel_stall_torque_threshold) &&
-                      (std::abs(wheel_velocities(FL)) < params_.wheel_stall_vel_threshold);
-    bool fr_stalled = (std::abs(wheel_efforts(FR)) > params_.wheel_stall_torque_threshold) &&
-                      (std::abs(wheel_velocities(FR)) < params_.wheel_stall_vel_threshold);
-    bool front_axle_stalled = fl_stalled || fr_stalled;
-
-    // 2. Bilateral front axle torque metrics
-    double tau_whl_avg = 0.5 * (std::abs(wheel_efforts(FL)) + std::abs(wheel_efforts(FR)));
-    double tau_ecc_avg = 0.5 * (std::abs(ecc_efforts(FL)) + std::abs(ecc_efforts(FR)));
-    double tau_ecc_max = std::max(std::abs(ecc_efforts(FL)), std::abs(ecc_efforts(FR)));
-
-    // 3. Kinematic velocity drop shock & deceleration shock
-    double vel_drop = cmd_forward_vel - chassis_forward_vel;
-    bool vel_drop_shock = forward_cmd_active && (vel_drop > 0.10);
-    bool decel_shock = vel_drop_shock || (forward_cmd_active && (imu_accel_x < -params_.kinematic_decel_shock_thresh));
-
-    // 4. Flat ground suppression: if wheels are rolling freely on horizontal ground with normal cruising loads
-    bool flat_rolling = (std::abs(geometry.delta_height) < 0.025) &&
-                        (geometry.nose_up_pitch < 0.04) &&
-                        (!front_axle_stalled) &&
-                        (!decel_shock) &&
-                        (tau_whl_avg < 2.8) &&
-                        (tau_ecc_avg < 3.2);
-
-    // 5. Multi-modal obstacle evidence calculation
-    double evidence_in = 0.0;
-    if (forward_cmd_active && !in_startup_phase && !flat_rolling) {
-        // Evidence from bilateral drive wheel load (nominal flat cruising is ~1.5 Nm, wall obstacle is >3.5 Nm)
-        double whl_ev = std::clamp((tau_whl_avg - 2.2) / 3.0, 0.0, 1.0);
-
-        // Evidence from eccentric joint impact load (gravity baseline is ~2.0 Nm, wall collision is >4.5 Nm)
-        double ecc_ev = std::clamp((tau_ecc_max - 3.8) / 4.0, 0.0, 1.0);
-
-        // Evidence from velocity drop / deceleration shock
-        double shock_ev = decel_shock ? 0.85 : 0.0;
-
-        // Evidence from true wheel stall
-        double stall_ev = front_axle_stalled ? 0.90 : 0.0;
-
-        // Evidence from geometric wall climbing
-        double geom_ev = geometry.front_wall_climbing ? 1.0 : 0.0;
-
-        // Inhibitor: if user is aggressively throttling up on flat terrain without decel shock or ecc load
-        if (manual_accel_transient && !decel_shock && !front_axle_stalled && tau_ecc_max < 3.0) {
-            whl_ev *= 0.2;
-            ecc_ev *= 0.2;
-        }
-
-        // Bilateral coincidence: require at least two distinct modalities or high-confidence stall/geometry
-        evidence_in = std::max({
-            geom_ev,
-            stall_ev,
-            0.45 * whl_ev + 0.45 * ecc_ev + 0.35 * shock_ev,
-            chassis_blocked ? (0.6 * whl_ev + 0.4 * ecc_ev) : 0.0
-        });
+    // Update Generalized Momentum Observer:
+    // p = M * vx
+    // \dot{z} = F_drive + r
+    // r = K_O * (p - z)
+    double total_drive_force = 0.0;
+    for (int i = 0; i < NUM_LEGS; ++i) {
+        total_drive_force += wheel_efforts(i) / params_.r_wheel;
     }
-
-    // 6. Continuous Leaky-Integrator Evidence Update
-    if (evidence_in > 0.35) {
-        // Accumulate evidence quickly (reaches 0.75 threshold in ~0.08s)
-        front_evidence_score_ = std::min(1.0, front_evidence_score_ + (evidence_in * 8.0) * dt);
+    double p_momentum = params_.total_mass * chassis_forward_vel;
+    if (forward_cmd_active) {
+        double k_obs = 15.0; // Observer gain (1/s)
+        momentum_observer_z_ += (total_drive_force + momentum_residual_) * dt;
+        momentum_residual_ = k_obs * (p_momentum - momentum_observer_z_);
     } else {
-        // Rapid exponential decay during unblocked cruising
-        front_evidence_score_ = std::max(0.0, front_evidence_score_ - params_.contact_evidence_decay_rate * dt);
+        momentum_observer_z_ = p_momentum;
+        momentum_residual_ = 0.0;
     }
 
-    // 7. Confirmed front impact when evidence score sustains threshold
-    if (front_evidence_score_ >= params_.contact_evidence_threshold) {
+    // 1. True physical wheel stall checks
+    // When wheels hit a vertical wall face, actual wheel speed drops near zero while motor torque saturates
+    double stall_tau_thresh = std::min(wheel_stall_torque_min_, 0.85 * 10.0 * (cmd_forward_vel / params_.r_wheel));
+    bool fl_stalled = (std::abs(wheel_efforts(FL)) >= stall_tau_thresh) &&
+                      (std::abs(wheel_velocities(FL)) < wheel_stall_vel_max_);
+    bool fr_stalled = (std::abs(wheel_efforts(FR)) >= stall_tau_thresh) &&
+                      (std::abs(wheel_velocities(FR)) < wheel_stall_vel_max_);
+    bool front_axle_stalled = fl_stalled && fr_stalled;
+    bool single_wheel_stalled = (fl_stalled || fr_stalled) &&
+                                (0.5 * (std::abs(wheel_efforts(FL)) + std::abs(wheel_efforts(FR))) >= stall_tau_thresh) &&
+                                (0.5 * (std::abs(wheel_velocities(FL)) + std::abs(wheel_velocities(FR))) < 0.8);
+
+    // 2. Chassis halted & IMU collision shock metrics
+    bool chassis_halted = (chassis_forward_vel < 0.08);
+    bool imu_impact_shock = (imu_accel_x < imu_decel_shock_threshold_);
+
+    // 3. Multi-modal obstacle evidence calculation (Strict Consistency Gate)
+    // Note: Eccentric arm torque is NEVER used as primary impact source because flat-ground pitch stabilization
+    // produces normal torque spikes. Obstacle impact is strictly determined by wheel stall + IMU shock + chassis halt.
+    double evidence_in = 0.0;
+    if (forward_cmd_active) {
+        if (geometry.front_wall_climbing) {
+            evidence_in = 1.0;
+        } else if (front_axle_stalled && (imu_impact_shock || chassis_halted)) {
+            evidence_in = 1.0;
+        } else if (single_wheel_stalled && imu_impact_shock && chassis_halted) {
+            evidence_in = 0.90;
+        }
+    }
+
+    // 4. Continuous Leaky-Integrator Evidence Update with consecutive cycle counter
+    if (evidence_in > 0.5) {
+        impact_confirm_cycles_++;
+        front_evidence_score_ = std::min(1.0, front_evidence_score_ + (evidence_in * 20.0) * dt);
+    } else {
+        impact_confirm_cycles_ = 0;
+        front_evidence_score_ = std::max(0.0, front_evidence_score_ - 15.0 * dt);
+    }
+
+    // 5. Confirmed front impact when evidence score sustains threshold AND consecutive cycles met (30ms debounce)
+    if (front_evidence_score_ >= 0.75 && impact_confirm_cycles_ >= REQUIRED_CONFIRM_CYCLES) {
         front_evidence_sustain_timer_ += dt;
-        if (front_evidence_sustain_timer_ >= 0.05) {
+        if (front_evidence_sustain_timer_ >= 0.03) {
             impact_flags_[FL] = true;
             impact_flags_[FR] = true;
         }
@@ -189,22 +199,56 @@ void ContactDetector::update(
         front_evidence_sustain_timer_ = 0.0;
     }
 
-    // 8. Direct geometric wall-climbing confirmation
-    if (forward_cmd_active && !in_startup_phase && geometry.front_wall_climbing) {
-        impact_flags_[FL] = true;
-        impact_flags_[FR] = true;
-    }
+    // 6. Rear wall contact confirmation (Dual-Track Arrival Observer: Continuous high-speed + Low-speed/Static bump)
+    // Front wheels are already crested or high on curb (delta_height > 0.030m or front_edge_crested)
+    bool front_on_plateau = (geometry.delta_height > 0.030) || geometry.front_edge_crested;
+    if (forward_cmd_active && front_on_plateau) {
+        // Drive wheel effort resistance
+        double tau_rear_max = std::max(std::abs(wheel_efforts(RL)), std::abs(wheel_efforts(RR)));
+        bool rear_wheel_resisting = (tau_rear_max > 2.0);
 
-    // 9. Rear wall contact confirmation
-    // If front wheels are already on top (delta_height > 0.04m) and rear wheels hit curb face
-    if (forward_cmd_active && geometry.delta_height > 0.04) {
+        // Fast channel: rear eccentric reaction torque step or high rate
+        bool rear_reaction_spike = (std::abs(delta_tau_ecc_(RL)) > 1.8 || std::abs(delta_tau_ecc_(RR)) > 1.8) ||
+                                   (std::abs(ecc_torque_rates_(RL)) > 12.0 || std::abs(ecc_torque_rates_(RR)) > 12.0);
+
+        // Track 1: Continuous high-speed arrival
+        // Robot has advanced at least wheelbase distance onto plateau (>= 0.22m) and rear wheels slip against curb face
+        bool continuous_arrival = (geometry.travel_distance >= 0.22) &&
+                                  (geometry.rear_slip_ratio > 0.65 || rear_wheel_resisting || chassis_halted);
+
+        // Track 2: Low-speed / Creeping / Static bump arrival
+        bool momentum_arrested = (momentum_residual_ < -10.0) || (chassis_forward_vel < 0.06);
         bool rear_stalled = (std::abs(wheel_velocities(RL)) < params_.wheel_stall_vel_threshold ||
                              std::abs(wheel_velocities(RR)) < params_.wheel_stall_vel_threshold) &&
-                            (std::abs(wheel_efforts(RL)) > 2.5 || std::abs(wheel_efforts(RR)) > 2.5);
-        double tau_rear_max = std::max(std::abs(wheel_efforts(RL)), std::abs(wheel_efforts(RR)));
-        if (rear_stalled || (chassis_blocked && tau_rear_max > 2.2) || (tau_rear_max > 4.5)) {
-            impact_flags_[RL] = true;
-            impact_flags_[RR] = true;
+                            rear_wheel_resisting;
+        bool static_bump_arrival = (rear_reaction_spike && (momentum_arrested || chassis_halted)) ||
+                                   (rear_wheel_resisting && (momentum_arrested || chassis_halted)) ||
+                                   rear_stalled ||
+                                   (tau_rear_max > 3.2);
+
+        // Fused contact condition
+        bool contact_evidence = continuous_arrival || static_bump_arrival;
+
+        if (contact_evidence) {
+            rear_impact_confirm_cycles_++;
+            if (rear_impact_confirm_cycles_ >= REQUIRED_REAR_CONFIRM_CYCLES) {
+                impact_flags_[RL] = true;
+                impact_flags_[RR] = true;
+            }
+        } else {
+            rear_impact_confirm_cycles_ = std::max(0, rear_impact_confirm_cycles_ - 1);
+        }
+    } else {
+        rear_impact_confirm_cycles_ = 0;
+    }
+
+    // Touchdown debouncing integration (30ms continuous load acceptance)
+    for (int i = 0; i < NUM_LEGS; ++i) {
+        bool touch_detected = (std::abs(ecc_efforts(i)) >= 2.0) || (std::abs(delta_tau_ecc_(i)) >= 1.8);
+        if (touch_detected) {
+            leg_touchdown_timers_[i] += dt;
+        } else {
+            leg_touchdown_timers_[i] = std::max(0.0, leg_touchdown_timers_[i] - 2.0 * dt);
         }
     }
 

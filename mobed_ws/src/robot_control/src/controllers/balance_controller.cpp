@@ -353,6 +353,8 @@ ControlOutput BalanceController::updateHybrid(
             target_positive = !is_front;
         } else if (current_config_ == PostureConfiguration::SPIN) {
             target_positive = (i == FL || i == RL);
+        } else if (current_config_ == PostureConfiguration::STRAFE_OUTWARD) {
+            target_positive = !is_front;
         }
 
         if (target_positive) {

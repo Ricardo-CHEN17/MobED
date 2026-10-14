@@ -25,9 +25,18 @@ enum class ClimbState {
     FRONT_WALL_CLIMB,   // Front wheels climb wall, eccentric arms fold with pitch feedback
     STRADDLE_LEVELING,  // Front wheels on curb, adaptive near-level differential stance (40mm~200mm)
     FRONT_PLACED = STRADDLE_LEVELING, // Backward-compatible alias
-    REAR_WALL_CLIMB,    // Rear wheels climb wall with front wheel pulling assist
-    REAR_CREST_FOLD,    // Rear hip cleared, fold rear legs onto curb smoothly
-    REAR_PLACED,        // All wheels on top of curb, advance 0.25m into plateau then release to IDLE
+    STRADDLE_HOLD,      // Operator pause hold: locking stance, wheels braked, closed-loop balance active
+    REAR_STRIDE_PREPARE,// RR support leg vertical, shift roll right (~ -3.5 deg) to anchor CoM inside triangle
+    REAR_SWING_LEFT,    // RL swing leg executes Cartesian cycloid trajectory onto plateau, FL/FR traction pull
+    REAR_LOAD_LEFT,     // RL confirms touchdown, wheel velocity synchronizes, outputs +4Nm forward push
+    REAR_SHIFT_LEFT,    // Smoothly shift roll left (~ +3.5 deg) to transfer weight to FL, FR, RL
+    REAR_SWING_RIGHT,   // RR swing leg executes Cartesian cycloid trajectory onto plateau
+    REAR_LOAD_RIGHT,    // RR confirms touchdown, all 4 wheels on plateau
+    REAR_SETTLED,       // Roll/pitch zero out, advance 0.25m into plateau, release to IDLE
+    // Backward-compatible aliases
+    REAR_WALL_CLIMB = REAR_STRIDE_PREPARE,
+    REAR_CREST_FOLD = REAR_SWING_LEFT,
+    REAR_PLACED = REAR_SETTLED
 };
 
 /**
@@ -53,7 +62,7 @@ struct TaskControllerParams {
     double cooldown_duration = 1.0;      // s
 
     // Active pitch leveling during straddle
-    double leveling_kp_pitch = 2.5;
+    double leveling_kp_pitch = 2.0;
     double leveling_kd_pitch = 0.3;
     double max_straddle_time_200mm = 8.0; // s
 };
@@ -69,7 +78,8 @@ public:
                 const Eigen::Vector4d& current_ecc_angles,
                 const Eigen::Vector4d& current_ecc_efforts,
                 double dt,
-                double body_vx = 0.0);
+                double body_vx = 0.0,
+                double cmd_vx = 0.20);
 
     void update(const estimation::ContactDetector& contact_detector,
                 const Eigen::Vector4d& current_ecc_angles,
@@ -77,7 +87,7 @@ public:
                 double dt,
                 double body_vx = 0.0) {
         estimation::ClimbGeometry dummy;
-        update(contact_detector, dummy, current_ecc_angles, current_ecc_efforts, dt, body_vx);
+        update(contact_detector, dummy, current_ecc_angles, current_ecc_efforts, dt, body_vx, 0.20);
     }
 
     void update(const estimation::ContactDetector& contact_detector,
@@ -116,6 +126,23 @@ public:
      * @return Target eccentric angle for rear legs (rad)
      */
     double computeRearLevelingAngle(double q_front_avg, double h_curb) const;
+
+    /**
+     * @brief Compute rear leg climbing sweep target angle to ensure complete cresting over obstacle lip.
+     * @param h_curb Curb height (m)
+     * @return Target eccentric angle for rear legs during REAR_WALL_CLIMB (rad, in [-2.75, -2.95])
+     */
+    double computeRearClimbTargetAngle(double h_curb) const;
+
+    /**
+     * @brief Compute smooth continuous cycloid trajectory for rear leg stepping over the curb lip.
+     */
+    double computeRearSwingTrajectory(double progress, double q_start, double q_land) const;
+
+    /**
+     * @brief Get active roll bias for dynamic CoM stability pre-shifting during Crawl Gait.
+     */
+    double getRollBias() const { return target_roll_bias_; }
 
     /**
      * @brief Reset lockout flag allowing immediate next climb without hard reboot.
@@ -216,6 +243,7 @@ private:
     // Selective lift mask for decoupled single-wheel / dual-wheel climbing (Phase 3)
     std::array<bool, NUM_LEGS> active_lift_mask_ = {false, false, false, false};
     double forward_vel_override_ = 0.0;
+    double target_roll_bias_ = 0.0;
 
     double current_front_target_ = 0.0;
 

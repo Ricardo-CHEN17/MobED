@@ -101,8 +101,9 @@ public:
         if (init_payload > 0.0) {
             balance_controller_->setPayloadMass(init_payload);
         }
-        if (init_config >= 0 && init_config <= 2) {
-            balance_controller_->setPostureConfiguration(static_cast<PostureConfiguration>(init_config));
+        if (init_config >= 0 && init_config <= 3) {
+            user_posture_config_ = static_cast<PostureConfiguration>(init_config);
+            balance_controller_->setPostureConfiguration(user_posture_config_);
         }
 
         // Adaptive Obstacle Curb Height Parameter & Subscription (0.04m ~ 0.15m)
@@ -129,14 +130,16 @@ public:
         sub_posture_mode_int_ = this->create_subscription<std_msgs::msg::Int32>(
             "/mobed/posture_mode", 10,
             [this](const std_msgs::msg::Int32::SharedPtr msg) {
-                if (msg->data >= 0 && msg->data <= 2) {
+                if (msg->data >= 0 && msg->data <= 3) {
                     auto cfg = static_cast<PostureConfiguration>(msg->data);
-                    const char* name = (cfg == PostureConfiguration::OUTWARD) ? "OUTWARD" :
-                                       (cfg == PostureConfiguration::INWARD)  ? "INWARD" : "SPIN";
+                    const char* name = (cfg == PostureConfiguration::OUTWARD)        ? "OUTWARD" :
+                                       (cfg == PostureConfiguration::INWARD)         ? "INWARD" :
+                                       (cfg == PostureConfiguration::SPIN)           ? "SPIN" : "STRAFE_OUTWARD";
                     RCLCPP_INFO(this->get_logger(), "Posture configuration changed to: %s (%d)", name, msg->data);
+                    user_posture_config_ = cfg;
                     balance_controller_->setPostureConfiguration(cfg);
                 } else {
-                    RCLCPP_WARN(this->get_logger(), "Invalid posture configuration integer: %d (0:OUTWARD, 1:INWARD, 2:SPIN)", msg->data);
+                    RCLCPP_WARN(this->get_logger(), "Invalid posture configuration integer: %d (0:OUTWARD, 1:INWARD, 2:SPIN, 3:STRAFE_OUTWARD)", msg->data);
                 }
             });
 
@@ -145,13 +148,20 @@ public:
             [this](const std_msgs::msg::String::SharedPtr msg) {
                 if (msg->data == "OUTWARD" || msg->data == "outward") {
                     RCLCPP_INFO(this->get_logger(), "Posture configuration changed to: OUTWARD");
+                    user_posture_config_ = PostureConfiguration::OUTWARD;
                     balance_controller_->setPostureConfiguration(PostureConfiguration::OUTWARD);
                 } else if (msg->data == "INWARD" || msg->data == "inward") {
                     RCLCPP_INFO(this->get_logger(), "Posture configuration changed to: INWARD");
+                    user_posture_config_ = PostureConfiguration::INWARD;
                     balance_controller_->setPostureConfiguration(PostureConfiguration::INWARD);
                 } else if (msg->data == "SPIN" || msg->data == "spin") {
                     RCLCPP_INFO(this->get_logger(), "Posture configuration changed to: SPIN");
+                    user_posture_config_ = PostureConfiguration::SPIN;
                     balance_controller_->setPostureConfiguration(PostureConfiguration::SPIN);
+                } else if (msg->data == "STRAFE_OUTWARD" || msg->data == "strafe_outward") {
+                    RCLCPP_INFO(this->get_logger(), "Posture configuration changed to: STRAFE_OUTWARD");
+                    user_posture_config_ = PostureConfiguration::STRAFE_OUTWARD;
+                    balance_controller_->setPostureConfiguration(PostureConfiguration::STRAFE_OUTWARD);
                 } else {
                     RCLCPP_WARN(this->get_logger(), "Invalid posture configuration string: '%s'", msg->data.c_str());
                 }
@@ -398,9 +408,10 @@ private:
                         b_a.x(), b_a.y(), b_a.z(), b_g.x(), b_g.y(), b_g.z());
                 }
             }
-            if (homing_timer_ > HOMING_DURATION) {
+            bool has_teleop_input = (cmd_vel_.norm() > 0.02 || std::abs(target_height_ - 0.205) > 0.01);
+            if (homing_timer_ > 1.0 || (homing_timer_ > 0.3 && has_teleop_input)) {
                 is_homing_ = false;
-                RCLCPP_INFO(this->get_logger(), "Homing complete. Full control pipeline active.");
+                RCLCPP_INFO(this->get_logger(), "Homing complete (active teleop preemption enabled). Full control pipeline active.");
             }
         }
 
@@ -493,13 +504,14 @@ private:
         // ============================================================
         if (!is_homing_ && !e_stop_active_) {
             // Forward Motion & Steering Inhibit Gate (Layer 2 Defense):
-            // Allow intentional forward approach (vx > 0.03) with reasonable oblique angles (|steer| < 0.85 rad ≈ 48°)
-            bool forward_intent = (cmd_vel_(0) > 0.03);
-            bool steer_aligned = (std::abs(curr_steer_angles_(0)) < 0.85) &&
-                                 (std::abs(curr_steer_angles_(1)) < 0.85);
+            // Require intentional forward approach (vx > 0.08) with steering aligned forward (|steer| < 0.60 rad ≈ 35°)
+            // Completely inhibits obstacle climb during lateral strafe or in-place spinning.
+            bool forward_intent = (cmd_vel_(0) > 0.08);
+            bool steer_aligned = (std::abs(curr_steer_angles_(0)) < 0.60) &&
+                                 (std::abs(curr_steer_angles_(1)) < 0.60);
             bool forward_straight_active = forward_intent && steer_aligned &&
-                                           (std::abs(cmd_vel_(2)) < 0.80) &&
-                                           (std::abs(cmd_vel_(1)) < 0.25);
+                                           (std::abs(cmd_vel_(2)) < 0.40) &&
+                                           (std::abs(cmd_vel_(1)) < 0.15);
 
             bool fl_stalled = (std::abs(curr_wheel_efforts_(0)) > robot_params_.wheel_stall_torque_threshold) &&
                               (std::abs(curr_wheel_velocities_(0)) < robot_params_.wheel_stall_vel_threshold);
@@ -516,10 +528,11 @@ private:
             bool transient_ramp = (cmd_vel_(0) > 0.05) && wheels_rolling_forward &&
                                   (geom.nose_up_pitch > robot_params_.ramp_inhibit_pitch_threshold);
 
-            bool is_on_ramp = !front_wheel_stalled && (steady_ramp || transient_ramp);
+            bool is_on_ramp = !front_wheel_stalled && (steady_ramp || transient_ramp) && (geom.delta_height < 0.035);
 
             bool obstacle_climb_permitted = (climb_mode_ != ClimbMode::DISABLED) &&
-                                            forward_straight_active && !is_on_ramp;
+                                            (forward_straight_active || geom.delta_height > 0.035) &&
+                                            !is_on_ramp;
 
             // Only reset contact detector when explicitly reversing or driving backwards
             if (!task_controller_->isActive() && cmd_vel_(0) < -0.05) {
@@ -528,7 +541,7 @@ private:
 
             if (obstacle_climb_permitted || task_controller_->isActive()) {
                 task_controller_->update(
-                    *contact_detector_, geom, curr_ecc_angles_, curr_ecc_efforts_, dt, chassis_forward_vel);
+                    *contact_detector_, geom, curr_ecc_angles_, curr_ecc_efforts_, dt, chassis_forward_vel, cmd_vel_(0));
             }
         }
 
@@ -540,6 +553,17 @@ private:
             RCLCPP_INFO(this->get_logger(), "[Adaptive FSM] Transition: %s -> %s | Overrides: [FL:%d FR:%d RL:%d RR:%d]",
                         prev_state_name.c_str(), curr_state_name.c_str(),
                         mask[FL], mask[FR], mask[RL], mask[RR]);
+            if ((prev_state_name == "REAR_PLACED" || prev_state_name == "REAR_SETTLED") && curr_state_name == "IDLE") {
+                // Post-climb handover: all 4 wheels settled on plateau.
+                // Reset terrain & state estimators so BalanceController treats plateau as new flat ground baseline,
+                // and sync balance controller angles to avoid any transient jerk.
+                terrain_estimator_->reset();
+                state_estimator_->reset();
+                climb_geometry_estimator_->reset();
+                contact_detector_->reset();
+                balance_controller_->syncCurrentAngles(curr_ecc_angles_);
+                RCLCPP_INFO(this->get_logger(), "[Adaptive FSM] Post-climb handover complete: plateau synchronized as flat baseline.");
+            }
             prev_state_name = curr_state_name;
         }
 
@@ -551,6 +575,61 @@ private:
             e_stop_active_, is_homing_, curr_steer_velocities_, curr_wheel_velocities_);
 
         prev_target_wheel_ = target_wheel;
+
+        // ============================================================
+        // Auto-Strafe Outward Stance Detection ("外八字" 判定)
+        // When lateral strafe is commanded and swerve steering modules have
+        // rotated into lateral alignment (FL/RR: ~ -90°, FR/RL: ~ +90°),
+        // automatically transition eccentric arms to STRAFE_OUTWARD stance.
+        // The eccentric arms smoothly lift the chassis by ~15mm as they pass
+        // through zero, flaring the wheels outward to a wide 391mm track width.
+        // ============================================================
+        if (user_posture_config_ == PostureConfiguration::OUTWARD &&
+            !task_controller_->isActive() && !is_homing_ && !e_stop_active_) {
+
+            bool strafe_intent = (std::abs(active_cmd_vel.y()) > 0.05 &&
+                                  std::abs(active_cmd_vel.y()) >= 0.8 * std::abs(active_cmd_vel.x()));
+
+            // Check if swerve steering modules have turned towards strafe alignment:
+            // FL and RR steer negative (< -0.80 rad ≈ -46°), FR and RL steer positive (> 0.80 rad ≈ +46°)
+            bool steer_aligned_strafe = (curr_steer_angles_(0) < -0.80 &&
+                                         curr_steer_angles_(1) >  0.80 &&
+                                         curr_steer_angles_(2) >  0.80 &&
+                                         curr_steer_angles_(3) < -0.80);
+
+            if (strafe_intent && steer_aligned_strafe) {
+                if (!strafe_outward_active_) {
+                    RCLCPP_INFO(this->get_logger(),
+                        "[Auto-Strafe] Wheels turned to strafe heading. Smoothly transitioning to wide '外八字' posture (STRAFE_OUTWARD, track: 391mm).");
+                }
+                strafe_outward_active_ = true;
+                strafe_exit_timer_ = 0.0;
+            } else if (strafe_outward_active_) {
+                // Exit condition: user drives longitudinally or stops commanding strafe
+                bool longitudinal_intent = (std::abs(active_cmd_vel.x()) > 0.10 &&
+                                            std::abs(active_cmd_vel.x()) > std::abs(active_cmd_vel.y()));
+                if (longitudinal_intent) {
+                    strafe_outward_active_ = false;
+                    strafe_exit_timer_ = 0.0;
+                    RCLCPP_INFO(this->get_logger(),
+                        "[Auto-Strafe] Longitudinal driving commanded. Returning smoothly to standard OUTWARD posture.");
+                } else if (!strafe_intent) {
+                    strafe_exit_timer_ += dt;
+                    if (strafe_exit_timer_ > 0.25) { // 250ms debounce
+                        strafe_outward_active_ = false;
+                        RCLCPP_INFO(this->get_logger(),
+                            "[Auto-Strafe] Strafe command ended. Returning smoothly to standard OUTWARD posture.");
+                    }
+                } else {
+                    strafe_exit_timer_ = 0.0;
+                }
+            }
+
+            PostureConfiguration effective_config = strafe_outward_active_
+                ? PostureConfiguration::STRAFE_OUTWARD
+                : user_posture_config_;
+            balance_controller_->setPostureConfiguration(effective_config);
+        }
 
         // ============================================================
         // Phase 6: Balance Controller (with Bank Angle overlay)
@@ -565,6 +644,9 @@ private:
         // Overlay bank angle from driving controller onto target roll (only during active motion, not homing)
         if (!is_homing_) {
             active_roll += driving_controller_->getBankAngle();
+            if (task_controller_->isActive()) {
+                active_roll += task_controller_->getRollBias();
+            }
         }
 
         // Prepare terrain state for BalanceController:
@@ -580,6 +662,7 @@ private:
             active_terrain_state.is_valid = true;
         } else if (task_controller_->isActive()) {
             active_terrain_state.pitch_slope = 0.0;
+            active_terrain_state.normal = Eigen::Vector3d(0.0, -std::sin(active_terrain_state.roll_slope), std::cos(active_terrain_state.roll_slope));
             active_terrain_state.rotation = Eigen::AngleAxisd(
                 active_terrain_state.roll_slope, Eigen::Vector3d::UnitX()).toRotationMatrix();
         }
@@ -649,11 +732,18 @@ private:
             // Eccentric: math → CAD
             cmd_msg.name.push_back(ecc_names[i]);
 
-            // Convert math-frame target directly to CAD frame (target_ecc is already smooth and continuous)
-            double raw_cad = target_ecc(i) * ecc_signs_[i] + ecc_offsets_[i];
-            prev_cad_ecc_[i] = raw_cad;
+            // Shortest-arc continuous tracking (寻找劣弧 / 连续角增量解包):
+            // The CAD target angle may cross the +-pi boundary (particularly on FR and RR where offset ~ -3.05 rad).
+            // Calling normalize_angle directly on the target causes a 2*pi branch-cut jump, commanding the servo
+            // to take the major arc (>180 deg) flying over the top.
+            // By computing the shortest angular delta relative to prev_cad_ecc_[i], the joint is mathematically
+            // guaranteed to advance smoothly along the minor arc (<= 180 deg) through the bottom, lifting the chassis.
+            double target_cad = target_ecc(i) * ecc_signs_[i] + ecc_offsets_[i];
+            double delta_cad = kinematics_->normalize_angle(target_cad - prev_cad_ecc_[i]);
+            double continuous_cad = prev_cad_ecc_[i] + delta_cad;
+            prev_cad_ecc_[i] = continuous_cad;
 
-            cmd_msg.position.push_back(raw_cad);
+            cmd_msg.position.push_back(continuous_cad);
             cmd_msg.velocity.push_back(0.0);
 
             // Zero out feedforward GRF torque for FSM-overridden legs to prevent conflict with position trajectory
@@ -682,6 +772,26 @@ private:
             }
             cmd_msg.velocity.push_back(target_wheel_vel * wheel_signs_[i]);
             double wheel_effort = driving_controller_->getWheelTorques()(i) * wheel_signs_[i];
+            // Traction torque injection during Crawl Gait climbing:
+            // Front wheels (FL, FR) pull forward with +5.0 Nm.
+            // When RL is loaded on plateau, RL pushes forward with +4.0 Nm.
+            if (task_controller_->isActive()) {
+                auto st = task_controller_->getState();
+                if (st == tasks::ClimbState::REAR_STRIDE_PREPARE ||
+                    st == tasks::ClimbState::REAR_SWING_LEFT ||
+                    st == tasks::ClimbState::REAR_LOAD_LEFT ||
+                    st == tasks::ClimbState::REAR_SHIFT_LEFT ||
+                    st == tasks::ClimbState::REAR_SWING_RIGHT) {
+                    if (i == FL || i == FR) {
+                        wheel_effort += 5.0 * wheel_signs_[i];
+                    }
+                    if ((st == tasks::ClimbState::REAR_LOAD_LEFT ||
+                         st == tasks::ClimbState::REAR_SHIFT_LEFT ||
+                         st == tasks::ClimbState::REAR_SWING_RIGHT) && i == RL) {
+                        wheel_effort += 4.0 * wheel_signs_[i];
+                    }
+                }
+            }
             cmd_msg.effort.push_back(wheel_effort);
         }
 
@@ -801,6 +911,11 @@ private:
     // Tracks the last-commanded CAD-frame angle for each ecc joint to ensure
     // the shortest-arc delta is applied each cycle, preventing 360° runaway.
     std::array<double, 4> prev_cad_ecc_ = {0.0, 0.0, 0.0, 0.0};
+
+    // Auto-Strafe Outward Stance ("外八字") state
+    PostureConfiguration user_posture_config_ = PostureConfiguration::OUTWARD;
+    bool strafe_outward_active_ = false;
+    double strafe_exit_timer_ = 0.0;
 };
 
 }  // namespace robot_control

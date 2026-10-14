@@ -108,6 +108,22 @@ public:
     const MobedParameters& getParams() const { return params_; }
 
     /**
+     * @brief Maximum safe steer angle from neutral (0.0).
+     * Safe outward sector for all wheels is [-MAX_SAFE_STEER_ANGLE, +MAX_SAFE_STEER_ANGLE].
+     * Fully spans all 360-deg planar traction vectors using 180-deg wheel speed inversion
+     * without ever drilling into the under-belly collision zone (|steer| > 92 deg).
+     */
+    static constexpr double MAX_SAFE_STEER_ANGLE = 1.60569; // ~92.0 deg (1.60569 rad)
+
+    /**
+     * @brief Structure defining individual leg safe outward steer sector
+     */
+    struct SteerSectorConfig {
+        double center_angle; // Safe outward center angle in rad
+        double half_width;   // Half width in rad
+    };
+
+    /**
      * @brief Structure defining forbidden inward steer sector
      */
     struct SteerForbiddenSector {
@@ -115,6 +131,14 @@ public:
         double half_width;   // Half width in radians
         bool active;         // True if sector is active
     };
+
+    /**
+     * @brief Get individual safe steering sector parameters for each leg
+     * FL: center = +0.785 rad (+45 deg), half_width = 1.571 rad (90 deg) -> [-45 deg, +135 deg]
+     * RL: center = -0.785 rad (-45 deg), half_width = 1.571 rad (90 deg) -> [-135 deg, +45 deg]
+     * FR & RR: center = 0.0 rad, half_width = 1.605 rad (~92 deg) -> [-92 deg, +92 deg]
+     */
+    SteerSectorConfig getLegSafeSectorConfig(int leg_index) const;
 
     /**
      * @brief Get forbidden inward steering angle sector parameters
@@ -125,24 +149,24 @@ public:
     SteerForbiddenSector getForbiddenSteerSectorInfo(int leg_index) const;
 
     /**
-     * @brief Check if a steer angle is inside the forbidden under-belly sector
+     * @brief Check if a steer angle is inside the forbidden under-belly sector for this leg
      * 
      * @param leg_index Leg index (FL, FR, RL, RR)
      * @param steer_angle Steering angle in radians
-     * @param margin Safety buffer in radians (default 0.03 rad ~ 1.7 deg)
+     * @param margin Safety buffer in radians (default 0.0)
      * @return true if inside forbidden sector
      */
-    bool isSteerInForbiddenSector(int leg_index, double steer_angle, double margin = 0.03) const;
+    bool isSteerInForbiddenSector(int leg_index, double steer_angle, double margin = 0.0) const;
 
     /**
-     * @brief Clamp/project an angle to the nearest boundary of the safe outward sector
+     * @brief Clamp/project an angle to this leg's safe outward sector
      * 
      * @param leg_index Leg index (FL, FR, RL, RR)
      * @param steer_angle Steering angle in radians
-     * @param margin Safety buffer in radians (default 0.03 rad ~ 1.7 deg)
+     * @param margin Safety buffer in radians (default 0.0)
      * @return Clamped safe steering angle in [-pi, pi]
      */
-    double clampToSafeSteerSector(int leg_index, double steer_angle, double margin = 0.03) const;
+    double clampToSafeSteerSector(int leg_index, double steer_angle, double margin = 0.0) const;
 
     /**
      * @brief Get the optimal outward wide-track stance angle for a leg

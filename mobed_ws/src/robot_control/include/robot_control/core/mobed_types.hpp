@@ -21,9 +21,10 @@ enum LegIndex : int {
 // Posture Configuration Convention (IEEE RA-L 2026 Paper Section II.B & Fig 5)
 // ============================================================================
 enum class PostureConfiguration : int {
-    OUTWARD = 0,  // Standard outdoor cruising: front outward (>0), rear outward (<0)
-    INWARD  = 1,  // Compact indoor navigation: front inward (<0), rear inward (>0), min wheelbase 728mm
-    SPIN    = 2   // In-place spin alignment: tangential orientation for minimum turning resistance
+    OUTWARD        = 0,  // Standard outdoor cruising: front outward (>0), rear outward (<0)
+    INWARD         = 1,  // Compact indoor navigation: front inward (<0), rear inward (>0), min wheelbase 728mm
+    SPIN           = 2,  // In-place spin alignment: tangential orientation for minimum turning resistance
+    STRAFE_OUTWARD = 3   // Lateral strafe wide stance (外八字): front outward (<0), rear outward (>0) when wheels steered sideways
 };
 
 // ============================================================================
@@ -69,6 +70,9 @@ struct BodyState {
     double roll()  const;
     double pitch() const;
     double yaw()   const;
+
+    /// Standardized elevation pitch angle: strictly > 0 when nose is tilted upwards
+    double nose_up_pitch() const { return -pitch(); }
 };
 
 // Inline implementations of Euler angle extraction (standard Tait-Bryan ZYX convention)
