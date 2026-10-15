@@ -115,8 +115,10 @@ public:
             "/mobed/curb_height", 10,
             [this](const std_msgs::msg::Float64::SharedPtr msg) {
                 double h = std::clamp(msg->data, 0.04, 0.22);
-                RCLCPP_INFO(this->get_logger(), "Adaptive curb height updated: %.3f m", h);
-                task_controller_->setCurbHeight(h);
+                if (!task_controller_->isActive() && !climb_geometry_estimator_->hasLatchedHeight()) {
+                    RCLCPP_INFO(this->get_logger(), "Manual curb height baseline preset: %.3f m", h);
+                    task_controller_->setCurbHeight(h);
+                }
             });
 
         sub_payload_mass_ = this->create_subscription<std_msgs::msg::Float64>(
@@ -528,21 +530,11 @@ private:
             bool transient_ramp = (cmd_vel_(0) > 0.05) && wheels_rolling_forward &&
                                   (geom.nose_up_pitch > robot_params_.ramp_inhibit_pitch_threshold);
 
-            // True continuous ramp: wheels roll freely forward with incline matching chassis pitch.
-            // delta_height is NOT restricted below 0.035m because a 10° ramp has delta_height = 0.08m!
-            bool is_on_ramp = !front_wheel_stalled && wheels_rolling_forward && (steady_ramp || transient_ramp);
+            bool is_on_ramp = !front_wheel_stalled && (steady_ramp || transient_ramp) && (geom.delta_height < 0.035);
 
-            // Obstacle climbing permission:
-            // Prohibited on continuous ramps or during in-place spins/strafes.
-            // Requires true physical wall obstacle contact (front wheel stall, wall climbing, or confirmed impact).
-            bool obstacle_detected = front_wheel_stalled || geom.front_wall_climbing ||
-                                     contact_detector_->frontImpactDetected() ||
-                                     contact_detector_->isFrontStallSustained() ||
-                                     (geom.front_edge_crested && geom.delta_height > 0.040);
             bool obstacle_climb_permitted = (climb_mode_ != ClimbMode::DISABLED) &&
-                                            forward_straight_active &&
-                                            !is_on_ramp &&
-                                            obstacle_detected;
+                                            (forward_straight_active || geom.delta_height > 0.035) &&
+                                            !is_on_ramp;
 
             // Only reset contact detector when explicitly reversing or driving backwards
             if (!task_controller_->isActive() && cmd_vel_(0) < -0.05) {
@@ -563,7 +555,7 @@ private:
             RCLCPP_INFO(this->get_logger(), "[Adaptive FSM] Transition: %s -> %s | Overrides: [FL:%d FR:%d RL:%d RR:%d]",
                         prev_state_name.c_str(), curr_state_name.c_str(),
                         mask[FL], mask[FR], mask[RL], mask[RR]);
-            if ((prev_state_name == "REAR_PLACED" || prev_state_name == "REAR_SETTLED") && curr_state_name == "IDLE") {
+            if (prev_state_name == "REAR_PLACED" && curr_state_name == "IDLE") {
                 // Post-climb handover: all 4 wheels settled on plateau.
                 // Reset terrain & state estimators so BalanceController treats plateau as new flat ground baseline,
                 // and sync balance controller angles to avoid any transient jerk.
@@ -654,9 +646,6 @@ private:
         // Overlay bank angle from driving controller onto target roll (only during active motion, not homing)
         if (!is_homing_) {
             active_roll += driving_controller_->getBankAngle();
-            if (task_controller_->isActive()) {
-                active_roll += task_controller_->getRollBias();
-            }
         }
 
         // Prepare terrain state for BalanceController:
@@ -675,11 +664,6 @@ private:
             active_terrain_state.normal = Eigen::Vector3d(0.0, -std::sin(active_terrain_state.roll_slope), std::cos(active_terrain_state.roll_slope));
             active_terrain_state.rotation = Eigen::AngleAxisd(
                 active_terrain_state.roll_slope, Eigen::Vector3d::UnitX()).toRotationMatrix();
-        }
-
-        // Synchronize contact_valid with the latest FSM state (Phase 4 may have transitioned state)
-        if (task_controller_->isActive()) {
-            contact_valid = task_controller_->getContactValid();
         }
 
         // Call updateHybrid using contact points from Phase 2.5 and body_state from Phase 2
@@ -787,23 +771,18 @@ private:
             }
             cmd_msg.velocity.push_back(target_wheel_vel * wheel_signs_[i]);
             double wheel_effort = driving_controller_->getWheelTorques()(i) * wheel_signs_[i];
-            // Traction torque injection during Crawl Gait climbing:
-            // Front wheels (FL, FR) pull forward with +5.0 Nm.
-            // When RL is loaded on plateau, RL pushes forward with +4.0 Nm.
+            // Traction torque injection during climbing phases:
+            // FRONT_WALL_CLIMB: Front wheels (FL, FR) inject +4.0 Nm to bite vertical wall face
+            // REAR_WALL_CLIMB: Front wheels (FL, FR) pull forward with +7.0 Nm to drag chassis onto plateau
             if (task_controller_->isActive()) {
-                auto st = task_controller_->getState();
-                if (st == tasks::ClimbState::REAR_STRIDE_PREPARE ||
-                    st == tasks::ClimbState::REAR_SWING_LEFT ||
-                    st == tasks::ClimbState::REAR_LOAD_LEFT ||
-                    st == tasks::ClimbState::REAR_SHIFT_LEFT ||
-                    st == tasks::ClimbState::REAR_SWING_RIGHT) {
+                auto state = task_controller_->getState();
+                if (state == tasks::ClimbState::FRONT_WALL_CLIMB) {
                     if (i == FL || i == FR) {
-                        wheel_effort += 5.0 * wheel_signs_[i];
-                    }
-                    if ((st == tasks::ClimbState::REAR_LOAD_LEFT ||
-                         st == tasks::ClimbState::REAR_SHIFT_LEFT ||
-                         st == tasks::ClimbState::REAR_SWING_RIGHT) && i == RL) {
                         wheel_effort += 4.0 * wheel_signs_[i];
+                    }
+                } else if (state == tasks::ClimbState::REAR_WALL_CLIMB) {
+                    if (i == FL || i == FR) {
+                        wheel_effort += 7.0 * wheel_signs_[i];
                     }
                 }
             }

@@ -31,8 +31,8 @@ struct ClimbGeometry {
     double travel_distance = 0.0;        // Accumulated forward travel distance onto plateau (m)
     double rear_slip_ratio = 0.0;        // Rear drive wheel slip ratio [0.0, 1.0]
     double belly_clearance_margin = 0.0; // Estimated clearance between chassis bottom and curb edge (m)
-    bool gate_swing_permitted = false;   // True if rear hip is sufficiently high for swing leg to clear curb
-    double stability_margin_y = 0.0;     // Lateral stability margin (m)
+    double front_z_vel = 0.0;            // Rate of change of front contact height in world frame (m/s)
+    double max_climbed_z = 0.0;          // Peak climbed front wheel height during climb (m)
 };
 
 /**
@@ -87,6 +87,10 @@ private:
 
     double travel_distance_ = 0.0;
     double rear_slip_ratio_ = 0.0;
+    double prev_front_h_ = 0.0;
+    double front_z_vel_ = 0.0;
+    double max_climbed_z_ = 0.0;
+    double crest_confirm_timer_ = 0.0;
 };
 
 }  // namespace estimation

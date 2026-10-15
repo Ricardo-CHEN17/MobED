@@ -26,17 +26,9 @@ enum class ClimbState {
     STRADDLE_LEVELING,  // Front wheels on curb, adaptive near-level differential stance (40mm~200mm)
     FRONT_PLACED = STRADDLE_LEVELING, // Backward-compatible alias
     STRADDLE_HOLD,      // Operator pause hold: locking stance, wheels braked, closed-loop balance active
-    REAR_STRIDE_PREPARE,// RR support leg vertical, shift roll right (~ -3.5 deg) to anchor CoM inside triangle
-    REAR_SWING_LEFT,    // RL swing leg executes Cartesian cycloid trajectory onto plateau, FL/FR traction pull
-    REAR_LOAD_LEFT,     // RL confirms touchdown, wheel velocity synchronizes, outputs +4Nm forward push
-    REAR_SHIFT_LEFT,    // Smoothly shift roll left (~ +3.5 deg) to transfer weight to FL, FR, RL
-    REAR_SWING_RIGHT,   // RR swing leg executes Cartesian cycloid trajectory onto plateau
-    REAR_LOAD_RIGHT,    // RR confirms touchdown, all 4 wheels on plateau
-    REAR_SETTLED,       // Roll/pitch zero out, advance 0.25m into plateau, release to IDLE
-    // Backward-compatible aliases
-    REAR_WALL_CLIMB = REAR_STRIDE_PREPARE,
-    REAR_CREST_FOLD = REAR_SWING_LEFT,
-    REAR_PLACED = REAR_SETTLED
+    REAR_WALL_CLIMB,    // Rear wheels climb wall with front wheel pulling assist
+    REAR_CREST_FOLD,    // Rear hip cleared, fold rear legs onto curb smoothly
+    REAR_PLACED,        // All wheels on top of curb, advance 0.25m into plateau then release to IDLE
 };
 
 /**
@@ -133,16 +125,6 @@ public:
      * @return Target eccentric angle for rear legs during REAR_WALL_CLIMB (rad, in [-2.75, -2.95])
      */
     double computeRearClimbTargetAngle(double h_curb) const;
-
-    /**
-     * @brief Compute smooth continuous cycloid trajectory for rear leg stepping over the curb lip.
-     */
-    double computeRearSwingTrajectory(double progress, double q_start, double q_land) const;
-
-    /**
-     * @brief Get active roll bias for dynamic CoM stability pre-shifting during Crawl Gait.
-     */
-    double getRollBias() const { return target_roll_bias_; }
 
     /**
      * @brief Reset lockout flag allowing immediate next climb without hard reboot.
@@ -243,16 +225,15 @@ private:
     // Selective lift mask for decoupled single-wheel / dual-wheel climbing (Phase 3)
     std::array<bool, NUM_LEGS> active_lift_mask_ = {false, false, false, false};
     double forward_vel_override_ = 0.0;
-    double target_roll_bias_ = 0.0;
 
     double current_front_target_ = 0.0;
 
     // Timing
     double state_timer_ = 0.0;        // time spent in current state
-    double active_climb_timer_ = 0.0; // time spent actively driving forward in climbing state
     double blend_out_timer_ = 0.0;    // timer counting the FSM→IDLE blend-out phase
     double cooldown_timer_ = 0.0;     // refractory timer inhibiting re-triggers in IDLE
     double travel_distance_ = 0.0;    // integrated travel distance during body advance in FRONT_PLACED
+    double stall_jam_timer_ = 0.0;     // watchdog timer accumulating true physical stall duration
 
     // Blend-out weight: 1.0 = full FSM override; 0.0 = fully handed back to balance controller.
     double blend_out_weight_ = 0.0;

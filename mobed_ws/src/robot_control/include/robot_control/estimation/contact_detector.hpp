@@ -99,22 +99,6 @@ public:
     Eigen::Vector4d getDeltaTauEcc() const { return delta_tau_ecc_; }
 
     /**
-     * @brief Check if front axle has experienced sustained physical motor stall (>= 80ms).
-     * Indicates solid wall obstacle arrest, independent of transient IMU shock.
-     */
-    bool isFrontStallSustained() const { return front_stall_timer_ >= 0.080; }
-    bool isFrontAxleStalled() const { return front_axle_stalled_; }
-
-    /**
-     * @brief Check if a specific swing leg has established firm touchdown onto the plateau.
-     * Verified by eccentric reaction torque jump >= 2.0 Nm sustained for >= 30ms.
-     */
-    bool isLegTouchdown(int leg_index) const {
-        if (leg_index < 0 || leg_index >= NUM_LEGS) return false;
-        return leg_touchdown_timers_[leg_index] >= 0.030;
-    }
-
-    /**
      * @brief Reset all detection state and history buffers.
      */
     void reset();
@@ -134,15 +118,6 @@ private:
     double front_evidence_sustain_timer_ = 0.0;
     double prev_cmd_vel_ = 0.0;
 
-    // Sustained front wheel stall timer (for obstacle arrest without IMU shock)
-    double front_stall_timer_ = 0.0;
-    bool front_axle_stalled_ = false;
-
-    // Minimum forward travel distance onto plateau before rear impact is permitted (m)
-    // Distance between front wheel contact after landing and rear curb face is ~0.30m.
-    // Setting window threshold to 0.28m ensures timely rear step detection without premature trigger.
-    double min_wheelbase_travel_ = 0.28;
-
     // Consistency Gate Thresholds and Filters
     double imu_decel_shock_threshold_ = -0.75;  // m/s^2, longitudinal impact shock
     double wheel_stall_vel_max_       = 0.8;    // rad/s, maximum wheel speed during true stall
@@ -161,7 +136,6 @@ private:
     // Two-stage detection timers per leg
     std::array<double, NUM_LEGS> shock_window_timer_;
     std::array<double, NUM_LEGS> sustain_timer_;
-    std::array<double, NUM_LEGS> leg_touchdown_timers_ = {0.0, 0.0, 0.0, 0.0};
     double startup_timer_ = 0.0;
 
     // Sliding window history for torque derivative computation
