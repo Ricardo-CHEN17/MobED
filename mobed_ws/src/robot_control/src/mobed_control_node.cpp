@@ -751,6 +751,15 @@ private:
             double effort_cmd = leg_is_overridden
                               ? 0.0
                               : balance_out.ecc_torques(i) * ecc_signs_[i] * ff_weight;
+
+            // Snap-kick downforce injection:
+            // When in REAR_CREST_FOLD with snap_kick_active (80~110mm), inject -35.0 Nm downward step torque on RL and RR!
+            if (task_controller_->isActive() && task_controller_->isSnapKickActive()) {
+                if (i == RL || i == RR) {
+                    effort_cmd = -35.0 * ecc_signs_[i];
+                }
+            }
+
             effort_cmd = std::clamp(effort_cmd, -50.0, 50.0);
             cmd_msg.effort.push_back(effort_cmd);
 
@@ -773,16 +782,46 @@ private:
             double wheel_effort = driving_controller_->getWheelTorques()(i) * wheel_signs_[i];
             // Traction torque injection during climbing phases:
             // FRONT_WALL_CLIMB: Front wheels (FL, FR) inject +4.0 Nm to bite vertical wall face
-            // REAR_WALL_CLIMB: Front wheels (FL, FR) pull forward with +7.0 Nm to drag chassis onto plateau
+            // STRADDLE_LEVELING: Front wheels (FL, FR) pull with +4.0 Nm to advance chassis
+            // REAR_WALL_CLIMB & REAR_VAULT_LOOP & REAR_CREST_FOLD: Front wheels pull with +7.0 Nm
             if (task_controller_->isActive()) {
                 auto state = task_controller_->getState();
-                if (state == tasks::ClimbState::FRONT_WALL_CLIMB) {
+                if (state == tasks::ClimbState::FRONT_WALL_CLIMB || state == tasks::ClimbState::STRADDLE_LEVELING) {
                     if (i == FL || i == FR) {
                         wheel_effort += 4.0 * wheel_signs_[i];
                     }
                 } else if (state == tasks::ClimbState::REAR_WALL_CLIMB) {
                     if (i == FL || i == FR) {
                         wheel_effort += 7.0 * wheel_signs_[i];
+                    }
+                } else if (state == tasks::ClimbState::REAR_VAULT_LOOP) {
+                    if (i == FL || i == FR) {
+                        wheel_effort += 8.5 * wheel_signs_[i];
+                    }
+                } else if (state == tasks::ClimbState::REAR_TOUCHDOWN_SETTLE) {
+                    // Stance freeze buffer: zero extra wheel effort injection
+                } else if (state == tasks::ClimbState::REAR_CREEP_ADVANCE) {
+                    // Gentle creep crawl away from curb edge: +3.5 Nm on all 4 wheels
+                    wheel_effort += 3.5 * wheel_signs_[i];
+                } else if (state == tasks::ClimbState::REAR_CREST_FOLD) {
+                    if (task_controller_->isSnapKickActive()) {
+                        if (i == FL || i == FR) {
+                            wheel_effort += 7.0 * wheel_signs_[i];
+                        } else if (i == RL || i == RR) {
+                            wheel_effort += 6.0 * wheel_signs_[i];
+                        }
+                    } else if (task_controller_->isCoordinatedLiftActive()) {
+                        // Coordinated lift: +5.0 Nm on all 4 wheels
+                        wheel_effort += 5.0 * wheel_signs_[i];
+                    } else {
+                        if (i == FL || i == FR) {
+                            wheel_effort += 7.0 * wheel_signs_[i];
+                        }
+                    }
+                } else if (state == tasks::ClimbState::REAR_POST_CLIMB_RESET) {
+                    // Ground rolling reset: front wheels pull with +4.0 Nm to guide chassis
+                    if (i == FL || i == FR) {
+                        wheel_effort += 4.0 * wheel_signs_[i];
                     }
                 }
             }

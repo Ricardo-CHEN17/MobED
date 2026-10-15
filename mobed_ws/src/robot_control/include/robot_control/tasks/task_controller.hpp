@@ -23,11 +23,15 @@ namespace tasks {
 enum class ClimbState {
     IDLE,               // Normal driving, monitoring for front wheel impact / wall-roll
     FRONT_WALL_CLIMB,   // Front wheels climb wall, eccentric arms fold with pitch feedback
-    STRADDLE_LEVELING,  // Front wheels on curb, adaptive near-level differential stance (40mm~200mm)
+    STRADDLE_LEVELING,  // Front wheels on curb, advancing until rear wheels touch wall
     FRONT_PLACED = STRADDLE_LEVELING, // Backward-compatible alias
     STRADDLE_HOLD,      // Operator pause hold: locking stance, wheels braked, closed-loop balance active
-    REAR_WALL_CLIMB,    // Rear wheels climb wall with front wheel pulling assist
-    REAR_CREST_FOLD,    // Rear hip cleared, fold rear legs onto curb smoothly
+    REAR_WALL_CLIMB,    // Rear wheels at wall (80~110mm: snap-sweep; 200mm: gentle soft descent onto curb)
+    REAR_VAULT_LOOP,    // 200mm only: high-speed 360-degree forward loop over curb lip
+    REAR_TOUCHDOWN_SETTLE, // 200mm only: 0.20s stance freeze & damping buffer upon landing
+    REAR_CREEP_ADVANCE, // 200mm only: 0.12 m/s creeping forward 50~80mm onto plateau away from edge
+    REAR_CREST_FOLD,    // 80~110mm: 0.18s snap-kick (+35Nm downforce); 200mm: coordinated chassis lift
+    REAR_POST_CLIMB_RESET, // 200mm only: 0.80s smooth ground roll reset of rear legs from -5.63 to -6.93 (-0.65)
     REAR_PLACED,        // All wheels on top of curb, advance 0.25m into plateau then release to IDLE
 };
 
@@ -213,6 +217,16 @@ public:
      */
     void reset();
 
+    /**
+     * @brief Check if currently in dynamic snap-kick downforce state (80~110mm).
+     */
+    bool isSnapKickActive() const { return snap_kick_active_; }
+
+    /**
+     * @brief Check if currently in coordinated 4-wheel chassis lift state (200mm).
+     */
+    bool isCoordinatedLiftActive() const { return coordinated_lift_active_; }
+
 private:
     TaskControllerParams params_;
     ClimbState state_ = ClimbState::IDLE;
@@ -238,6 +252,11 @@ private:
     // Blend-out weight: 1.0 = full FSM override; 0.0 = fully handed back to balance controller.
     double blend_out_weight_ = 0.0;
     bool has_climbed_ = false;
+
+    // Active sub-mode flags
+    bool snap_kick_active_ = false;
+    bool coordinated_lift_active_ = false;
+    double landing_rear_q_ = -4.65;
 
     // Stored start angles and target angles
     Eigen::Vector4d lift_start_angles_ = Eigen::Vector4d::Zero();
