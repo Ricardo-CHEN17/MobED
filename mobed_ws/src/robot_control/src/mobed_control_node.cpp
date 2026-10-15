@@ -528,11 +528,21 @@ private:
             bool transient_ramp = (cmd_vel_(0) > 0.05) && wheels_rolling_forward &&
                                   (geom.nose_up_pitch > robot_params_.ramp_inhibit_pitch_threshold);
 
-            bool is_on_ramp = !front_wheel_stalled && (steady_ramp || transient_ramp) && (geom.delta_height < 0.035);
+            // True continuous ramp: wheels roll freely forward with incline matching chassis pitch.
+            // delta_height is NOT restricted below 0.035m because a 10° ramp has delta_height = 0.08m!
+            bool is_on_ramp = !front_wheel_stalled && wheels_rolling_forward && (steady_ramp || transient_ramp);
 
+            // Obstacle climbing permission:
+            // Prohibited on continuous ramps or during in-place spins/strafes.
+            // Requires true physical wall obstacle contact (front wheel stall, wall climbing, or confirmed impact).
+            bool obstacle_detected = front_wheel_stalled || geom.front_wall_climbing ||
+                                     contact_detector_->frontImpactDetected() ||
+                                     contact_detector_->isFrontStallSustained() ||
+                                     (geom.front_edge_crested && geom.delta_height > 0.040);
             bool obstacle_climb_permitted = (climb_mode_ != ClimbMode::DISABLED) &&
-                                            (forward_straight_active || geom.delta_height > 0.035) &&
-                                            !is_on_ramp;
+                                            forward_straight_active &&
+                                            !is_on_ramp &&
+                                            obstacle_detected;
 
             // Only reset contact detector when explicitly reversing or driving backwards
             if (!task_controller_->isActive() && cmd_vel_(0) < -0.05) {
@@ -665,6 +675,11 @@ private:
             active_terrain_state.normal = Eigen::Vector3d(0.0, -std::sin(active_terrain_state.roll_slope), std::cos(active_terrain_state.roll_slope));
             active_terrain_state.rotation = Eigen::AngleAxisd(
                 active_terrain_state.roll_slope, Eigen::Vector3d::UnitX()).toRotationMatrix();
+        }
+
+        // Synchronize contact_valid with the latest FSM state (Phase 4 may have transitioned state)
+        if (task_controller_->isActive()) {
+            contact_valid = task_controller_->getContactValid();
         }
 
         // Call updateHybrid using contact points from Phase 2.5 and body_state from Phase 2

@@ -249,6 +249,7 @@ private:
 
     // Timing
     double state_timer_ = 0.0;        // time spent in current state
+    double active_climb_timer_ = 0.0; // time spent actively driving forward in climbing state
     double blend_out_timer_ = 0.0;    // timer counting the FSM→IDLE blend-out phase
     double cooldown_timer_ = 0.0;     // refractory timer inhibiting re-triggers in IDLE
     double travel_distance_ = 0.0;    // integrated travel distance during body advance in FRONT_PLACED

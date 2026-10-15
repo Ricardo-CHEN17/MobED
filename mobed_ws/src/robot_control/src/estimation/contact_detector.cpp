@@ -161,20 +161,31 @@ void ContactDetector::update(
                                 (0.5 * (std::abs(wheel_efforts(FL)) + std::abs(wheel_efforts(FR))) >= stall_tau_thresh) &&
                                 (0.5 * (std::abs(wheel_velocities(FL)) + std::abs(wheel_velocities(FR))) < 0.8);
 
+    front_axle_stalled_ = front_axle_stalled;
+
     // 2. Chassis halted & IMU collision shock metrics
     bool chassis_halted = (chassis_forward_vel < 0.08);
     bool imu_impact_shock = (imu_accel_x < imu_decel_shock_threshold_);
 
+    // Track sustained physical wheel stall against vertical wall face
+    if (forward_cmd_active && (front_axle_stalled || (single_wheel_stalled && chassis_halted))) {
+        front_stall_timer_ += dt;
+    } else {
+        front_stall_timer_ = std::max(0.0, front_stall_timer_ - 2.0 * dt);
+    }
+
     // 3. Multi-modal obstacle evidence calculation (Strict Consistency Gate)
-    // Note: Eccentric arm torque is NEVER used as primary impact source because flat-ground pitch stabilization
-    // produces normal torque spikes. Obstacle impact is strictly determined by wheel stall + IMU shock + chassis halt.
+    // Robust detection: supports both fast collision shock and steady creeping obstacle arrest (>=80ms stall)
     double evidence_in = 0.0;
     if (forward_cmd_active) {
         if (geometry.front_wall_climbing) {
             evidence_in = 1.0;
+        } else if (front_stall_timer_ >= 0.080) {
+            // Sustained physical motor stall against obstacle face (80ms confirmed)
+            evidence_in = 1.0;
         } else if (front_axle_stalled && (imu_impact_shock || chassis_halted)) {
             evidence_in = 1.0;
-        } else if (single_wheel_stalled && imu_impact_shock && chassis_halted) {
+        } else if (single_wheel_stalled && chassis_halted) {
             evidence_in = 0.90;
         }
     }
@@ -199,35 +210,31 @@ void ContactDetector::update(
         front_evidence_sustain_timer_ = 0.0;
     }
 
-    // 6. Rear wall contact confirmation (Dual-Track Arrival Observer: Continuous high-speed + Low-speed/Static bump)
-    // Front wheels are already crested or high on curb (delta_height > 0.030m or front_edge_crested)
-    bool front_on_plateau = (geometry.delta_height > 0.030) || geometry.front_edge_crested;
-    if (forward_cmd_active && front_on_plateau) {
+    // 6. Rear wall contact confirmation (Wheelbase Odometry Gated Dual-Track Observer)
+    // Physical Requirement: The robot chassis wheelbase half-length is 0.15m. After front wheels crest onto plateau,
+    // the distance from rear wheel contact to step face is ~0.30m.
+    // Setting min_wheelbase_travel_ to 0.28m ensures the rear arrival check activates right as rear wheels reach the curb face.
+    bool front_on_plateau = geometry.front_edge_crested || (geometry.delta_height > 0.040);
+    bool wheelbase_reached = (geometry.travel_distance >= min_wheelbase_travel_);
+
+    if (forward_cmd_active && front_on_plateau && wheelbase_reached) {
         // Drive wheel effort resistance
         double tau_rear_max = std::max(std::abs(wheel_efforts(RL)), std::abs(wheel_efforts(RR)));
-        bool rear_wheel_resisting = (tau_rear_max > 2.0);
+        bool rear_wheel_resisting = (tau_rear_max > 1.8);
 
         // Fast channel: rear eccentric reaction torque step or high rate
-        bool rear_reaction_spike = (std::abs(delta_tau_ecc_(RL)) > 1.8 || std::abs(delta_tau_ecc_(RR)) > 1.8) ||
-                                   (std::abs(ecc_torque_rates_(RL)) > 12.0 || std::abs(ecc_torque_rates_(RR)) > 12.0);
+        bool rear_reaction_spike = (std::abs(delta_tau_ecc_(RL)) > 1.6 || std::abs(delta_tau_ecc_(RR)) > 1.6) ||
+                                   (std::abs(ecc_torque_rates_(RL)) > 10.0 || std::abs(ecc_torque_rates_(RR)) > 10.0);
 
-        // Track 1: Continuous high-speed arrival
-        // Robot has advanced at least wheelbase distance onto plateau (>= 0.22m) and rear wheels slip against curb face
-        bool continuous_arrival = (geometry.travel_distance >= 0.22) &&
-                                  (geometry.rear_slip_ratio > 0.65 || rear_wheel_resisting || chassis_halted);
-
-        // Track 2: Low-speed / Creeping / Static bump arrival
-        bool momentum_arrested = (momentum_residual_ < -10.0) || (chassis_forward_vel < 0.06);
+        // Physical rear stall against curb face
         bool rear_stalled = (std::abs(wheel_velocities(RL)) < params_.wheel_stall_vel_threshold ||
                              std::abs(wheel_velocities(RR)) < params_.wheel_stall_vel_threshold) &&
                             rear_wheel_resisting;
-        bool static_bump_arrival = (rear_reaction_spike && (momentum_arrested || chassis_halted)) ||
-                                   (rear_wheel_resisting && (momentum_arrested || chassis_halted)) ||
-                                   rear_stalled ||
-                                   (tau_rear_max > 3.2);
 
-        // Fused contact condition
-        bool contact_evidence = continuous_arrival || static_bump_arrival;
+        // Fused contact condition: rear wheels stalling against curb or forward motion arrested
+        bool contact_evidence = rear_stalled || (rear_reaction_spike && chassis_halted) ||
+                                (rear_wheel_resisting && chassis_halted) ||
+                                (chassis_halted && geometry.travel_distance >= 0.32);
 
         if (contact_evidence) {
             rear_impact_confirm_cycles_++;

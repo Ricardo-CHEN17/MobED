@@ -83,15 +83,17 @@ void ClimbGeometryEstimator::update(
     bool fl_spinning = std::abs(current_wheel_vels(FL)) > 0.3 * std::max(0.5, std::abs(target_wheel_vels(FL)));
     bool fr_spinning = std::abs(current_wheel_vels(FR)) > 0.3 * std::max(0.5, std::abs(target_wheel_vels(FR)));
 
-    double crest_h_thresh = std::clamp(target_step_height * 0.65, 0.030, 0.16);
-    if (geometry_.delta_height > crest_h_thresh && (fl_spinning || fr_spinning)) {
+    double crest_h_thresh = std::clamp(target_step_height * 0.65, 0.050, 0.16);
+    // Cresting requires delta_height > threshold AND nose pitch rate has stabilized (pitch_rate < 0.15 rad/s)
+    bool pitch_stabilizing = (geometry_.nose_up_pitch_rate < 0.15);
+    if (geometry_.delta_height > crest_h_thresh && (fl_spinning || fr_spinning) && pitch_stabilizing) {
         front_crest_timer_ += dt;
-        if (front_crest_timer_ >= 0.04) {
+        if (front_crest_timer_ >= 0.06) {
             geometry_.front_edge_crested = true;
         }
     } else {
         front_crest_timer_ = std::max(0.0, front_crest_timer_ - dt);
-        if (geometry_.delta_height < 0.025) {
+        if (geometry_.delta_height < 0.035) {
             geometry_.front_edge_crested = false;
         }
     }
@@ -112,11 +114,11 @@ void ClimbGeometryEstimator::update(
     }
 
     // 7. Auto Curb Height Latch
-    // Once front wheels have crested the curb edge and height difference is confirmed (> 0.030m),
+    // Once front wheels have crested the curb edge and height difference is confirmed (> 0.050m),
     // latch the true physical step height. This adapts all subsequent postures to the real terrain
     // without requiring manual keyboard input.
-    if (geometry_.front_edge_crested && !height_latched_ && geometry_.delta_height > 0.030) {
-        latched_curb_height_ = std::clamp(geometry_.delta_height, 0.04, 0.22);
+    if (geometry_.front_edge_crested && !height_latched_ && geometry_.delta_height > 0.050) {
+        latched_curb_height_ = std::clamp(geometry_.delta_height, 0.05, 0.22);
         height_latched_ = true;
     }
     geometry_.latched_curb_height = latched_curb_height_;
@@ -124,8 +126,12 @@ void ClimbGeometryEstimator::update(
 
     // 8. Plateau Path Odometry & Rear Drive Wheel Slip Ratio
     double chassis_vx = std::max(0.0, body_state.linear_velocity.x());
-    if (geometry_.front_edge_crested) {
-        travel_distance_ += chassis_vx * dt;
+    double front_wheel_lin_vel = 0.5 * (std::max(0.0, current_wheel_vels(FL)) +
+                                       std::max(0.0, current_wheel_vels(FR))) * params_.r_wheel;
+    double effective_travel_vx = std::max(chassis_vx, front_wheel_lin_vel);
+
+    if (geometry_.front_edge_crested || height_latched_) {
+        travel_distance_ += effective_travel_vx * dt;
     } else {
         travel_distance_ = 0.0;
     }

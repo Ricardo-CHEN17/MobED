@@ -20,6 +20,7 @@ void TaskController::reset() {
     active_lift_mask_.fill(false);
     forward_vel_override_ = 0.0;
     state_timer_ = 0.0;
+    active_climb_timer_ = 0.0;
     blend_out_timer_ = 0.0;
     blend_out_weight_ = 0.0;
     cooldown_timer_ = 0.0;
@@ -46,19 +47,24 @@ void TaskController::abort() {
 }
 
 void TaskController::transitionTo(ClimbState new_state) {
+    // Preserve travel_distance_ when toggling between STRADDLE_LEVELING and STRADDLE_HOLD
+    if (!((state_ == ClimbState::STRADDLE_LEVELING && new_state == ClimbState::STRADDLE_HOLD) ||
+          (state_ == ClimbState::STRADDLE_HOLD && new_state == ClimbState::STRADDLE_LEVELING))) {
+        travel_distance_ = 0.0;
+    }
     state_ = new_state;
     state_timer_ = 0.0;
-    travel_distance_ = 0.0;
+    active_climb_timer_ = 0.0;
 }
 
 double TaskController::computeFrontTargetAngle(double h_curb) const {
     double ratio = std::clamp((h_curb - 0.04) / (0.20 - 0.04), 0.0, 1.0);
-    // Maps [0.04m, 0.20m] smoothly to [1.65 rad, 1.95 rad] (95° ~ 111.7°)
-    // 5cm: 1.65 rad (120mm ground clearance)
-    // 10cm: 1.80 rad (103mm ground clearance)
-    // 20cm: 1.95 rad (88mm clearance, preserves >68mm steer column clearance above curb plateau!)
-    // Strictly capped at 1.95 rad to prevent steer column and chassis collision box from bottoming out (触底).
-    return 1.65 + ratio * (1.95 - 1.65);
+    // Maps [0.04m, 0.20m] smoothly to [1.55 rad, 1.92 rad] (88.8° ~ 110.0°)
+    // 5cm: ~1.59 rad
+    // 10cm: ~1.69 rad
+    // 20cm: 1.92 rad (elevates wheel center by Delta z = l_ecc * (1 - cos(1.92)) = 0.201m,
+    // ensuring the wheel climbs completely over 200mm vertical steps without getting blocked)
+    return 1.55 + ratio * (1.92 - 1.55);
 }
 
 double TaskController::computeAdaptiveLiftAngle([[maybe_unused]] double q_start) const {
@@ -67,8 +73,8 @@ double TaskController::computeAdaptiveLiftAngle([[maybe_unused]] double q_start)
 
 double TaskController::computeRearLevelingAngle([[maybe_unused]] double q_front_avg, double h_curb) const {
     double ratio = std::clamp((h_curb - 0.04) / (0.20 - 0.04), 0.0, 1.0);
-    // Smooth transition from -0.55 rad (gentle 40mm) to -0.15 rad (extreme 200mm high clearance)
-    return -0.55 + ratio * (-0.15 - (-0.55));
+    // Smooth transition from -0.55 rad (gentle 40mm) to -0.10 rad (extreme 200mm high clearance)
+    return -0.55 + ratio * (-0.10 - (-0.55));
 }
 
 double TaskController::computeRearClimbTargetAngle(double h_curb) const {
@@ -144,12 +150,14 @@ void TaskController::update(
                 break;
             }
 
-            bool front_impact = contact_detector.frontImpactDetected();
+            bool front_impact = contact_detector.frontImpactDetected() ||
+                                contact_detector.isFrontStallSustained();
+            bool front_wall_active = geometry.front_wall_climbing && (geometry.delta_height > 0.040);
             bool front_already_on_curb = (geometry.front_height >= (params_.target_curb_height - 0.035)) &&
                                          (geometry.delta_height >= (params_.target_curb_height - 0.045)) &&
                                          geometry.front_edge_crested && (std::abs(body_vx) > 0.02);
 
-            if (front_impact) {
+            if (front_impact || front_wall_active) {
                 lift_start_angles_ = current_ecc_angles;
                 current_front_target_ = 0.5 * (current_ecc_angles(FL) + current_ecc_angles(FR));
 
@@ -194,6 +202,12 @@ void TaskController::update(
             double h = params_.target_curb_height;
             double theta_ref = 0.060 + (h - 0.04) / (0.20 - 0.04) * (0.130 - 0.060);
 
+            // Active driving check: accumulate active_climb_timer_ only when commanding forward
+            bool forward_cmd_active = (cmd_vx > 0.08);
+            if (forward_cmd_active) {
+                active_climb_timer_ += dt;
+            }
+
             // Closed-loop pitch compliance rate:
             // When front wheels climb vertical wall, nose pitches up.
             // Front eccentric arms fold upward at matching rate to absorb height and prevent backward flipping.
@@ -204,10 +218,13 @@ void TaskController::update(
                 q_dot_fold = std::clamp(q_dot_fold, 0.5, 3.5);
             }
 
-            current_front_target_ += q_dot_fold * dt;
-            current_front_target_ = std::clamp(current_front_target_,
-                                               0.5 * (lift_start_angles_(FL) + lift_start_angles_(FR)),
-                                               front_target_angles_(0));
+            // Fold front legs forward/upward when forward drive is active or pitch is elevating
+            if (forward_cmd_active || geometry.nose_up_pitch > 0.04) {
+                current_front_target_ += q_dot_fold * dt;
+                current_front_target_ = std::clamp(current_front_target_,
+                                                   0.5 * (lift_start_angles_(FL) + lift_start_angles_(FR)),
+                                                   front_target_angles_(0));
+            }
 
             // Override front legs
             override_mask_[FL] = true;
@@ -222,17 +239,29 @@ void TaskController::update(
 
             // Traction drive: front wheels spin forward to grip wall, rear wheels push forward
             wheel_override_mask_.fill(true);
-            wheel_speed_overrides_(FL) = params_.front_roll_speed;
-            wheel_speed_overrides_(FR) = params_.front_roll_speed;
-            double rear_push_vx = 0.15;
-            wheel_speed_overrides_(RL) = rear_push_vx / params_.wheel_radius;
-            wheel_speed_overrides_(RR) = rear_push_vx / params_.wheel_radius;
-            forward_vel_override_ = rear_push_vx;
+            if (forward_cmd_active) {
+                wheel_speed_overrides_(FL) = params_.front_roll_speed;
+                wheel_speed_overrides_(FR) = params_.front_roll_speed;
+                double rear_push_vx = 0.15;
+                wheel_speed_overrides_(RL) = rear_push_vx / params_.wheel_radius;
+                wheel_speed_overrides_(RR) = rear_push_vx / params_.wheel_radius;
+                forward_vel_override_ = rear_push_vx;
+            } else {
+                // Operator paused or released stick: hold position with holding torque
+                wheel_speed_overrides_.setZero();
+                forward_vel_override_ = 0.0;
+            }
 
             // Early sanity check: if climbing was triggered falsely on flat ground,
-            // pitch won't rise within 0.40s and delta_height will remain near zero.
-            // Abort immediately back to IDLE with cooldown!
-            if (state_timer_ >= 0.40 && geometry.nose_up_pitch < 0.02 && geometry.delta_height < 0.015) {
+            // pitch won't rise within 0.50s of forward drive and delta_height will remain near zero.
+            if (active_climb_timer_ >= 0.50 && geometry.nose_up_pitch < 0.02 && geometry.delta_height < 0.015) {
+                cooldown_timer_ = params_.cooldown_duration;
+                transitionTo(ClimbState::IDLE);
+                break;
+            }
+
+            // Dismount backwards if operator explicitly commands hard reverse
+            if (cmd_vx < -0.30) {
                 cooldown_timer_ = params_.cooldown_duration;
                 transitionTo(ClimbState::IDLE);
                 break;
@@ -242,7 +271,7 @@ void TaskController::update(
             bool height_reached = geometry.delta_height >= (params_.target_curb_height - 0.035);
             bool target_reached = current_front_target_ >= (front_target_angles_(0) - 0.10);
             bool front_crested = (height_reached && target_reached) || geometry.front_edge_crested;
-            double max_front_climb_time = (h >= 0.15) ? 2.5 : 2.0;
+            double max_front_climb_time = (h >= 0.15) ? 4.5 : 3.5;
 
             if (front_crested) {
                 double active_h = geometry.has_latched_height ? geometry.latched_curb_height : params_.target_curb_height;
@@ -255,9 +284,8 @@ void TaskController::update(
                 rear_target_angles_(1) = target_r;
 
                 transitionTo(ClimbState::STRADDLE_LEVELING);
-            } else if (state_timer_ >= max_front_climb_time) {
-                // If front wheels never gained height, this was an abortive attempt or flat ground bump.
-                // Abort safely back to IDLE with cooldown!
+            } else if (active_climb_timer_ >= max_front_climb_time) {
+                // If front wheels never gained height after extended active forward push, abort safely
                 cooldown_timer_ = params_.cooldown_duration;
                 transitionTo(ClimbState::IDLE);
             }
@@ -281,10 +309,10 @@ void TaskController::update(
 
             // Two-stage front crouch:
             // Stage 1: Safe entry buffer (first 0.06m or 0.25s) keeps moderate 1.60 rad fold
-            // Stage 2: Adaptive deep crouch + Pitch leveling compliance, strictly capped at 1.95 rad to prevent bottoming out!
+            // Stage 2: Adaptive deep crouch + Pitch leveling compliance, clamped up to 1.92 rad
             double q_f_base = (travel_distance_ < 0.06 && state_timer_ < 0.25) ? 1.60 : target_f_adaptive;
             double pitch_corr = params_.leveling_kp_pitch * std::max(0.0, geometry.nose_up_pitch);
-            double q_f = std::clamp(q_f_base + pitch_corr, 1.55, 1.95);
+            double q_f = std::clamp(q_f_base + pitch_corr, 1.55, 1.92);
 
             double q_r = computeRearLevelingAngle(q_f, active_h);
             rear_target_angles_(0) = q_r;
@@ -307,20 +335,22 @@ void TaskController::update(
             wheel_speed_overrides_(RR) = push_spd;
             forward_vel_override_ = 0.35;
 
-            // Integrate travel distance (only integrate true forward motion)
+            // Integrate travel distance (monotonic forward accumulation)
             double effective_vx = (body_vx > 0.02) ? body_vx : 0.0;
             travel_distance_ += effective_vx * dt;
+            double total_travel = std::max(travel_distance_, geometry.travel_distance);
 
-            // Multi-cue arrival verification:
-            // Cue 1: Dual-track contact detector (reaction torque / momentum arrest)
-            // Cue 2: Odometry path arrival (>= 0.22m forward travel + rear slip)
-            // Cue 3: Physical stall backup while driving forward
+            // Multi-cue rear arrival verification:
+            // Wheelbase from front contact to rear wheel is ~0.30m.
+            // When rear wheels hit the curb face, travel is ~0.28m-0.32m.
             bool rear_impact = contact_detector.rearImpactDetected();
-            bool min_safe_straddle = (state_timer_ >= 0.20);
-            bool odometry_arrival = (geometry.travel_distance >= 0.22 && geometry.rear_slip_ratio > 0.65);
-            bool stall_arrival = (state_timer_ >= 0.60 && std::abs(body_vx) < 0.03 && geometry.travel_distance >= 0.10);
+            bool min_safe_straddle = (state_timer_ >= 0.35);
+            bool distance_reached = (total_travel >= 0.28);
+            bool chassis_halted = (std::abs(body_vx) < 0.04);
+            bool stall_arrival = (distance_reached && chassis_halted && state_timer_ >= 0.50);
+            bool odometry_arrival = (total_travel >= 0.32);
 
-            if (min_safe_straddle && (rear_impact || odometry_arrival || stall_arrival)) {
+            if (min_safe_straddle && (rear_impact || stall_arrival || odometry_arrival)) {
                 active_lift_mask_[RL] = true;
                 active_lift_mask_[RR] = true;
                 travel_distance_ = 0.0;
@@ -336,7 +366,7 @@ void TaskController::update(
             double active_h = geometry.has_latched_height ? geometry.latched_curb_height : params_.target_curb_height;
             double target_f = computeFrontTargetAngle(active_h);
             double pitch_corr = params_.leveling_kp_pitch * std::max(0.0, geometry.nose_up_pitch);
-            double q_f = std::clamp(target_f + pitch_corr, 1.55, 1.95);
+            double q_f = std::clamp(target_f + pitch_corr, 1.55, 1.92);
             double q_r = computeRearLevelingAngle(q_f, active_h);
 
             override_mask_.fill(true);
@@ -354,8 +384,8 @@ void TaskController::update(
             if (cmd_vx > 0.08) {
                 transitionTo(ClimbState::STRADDLE_LEVELING);
             }
-            // Dismount backwards when user commands reverse
-            else if (cmd_vx < -0.15) {
+            // Dismount backwards ONLY when user commands intentional hard reverse (avoid stick release bounce)
+            else if (cmd_vx < -0.30) {
                 cooldown_timer_ = params_.cooldown_duration;
                 transitionTo(ClimbState::IDLE);
             }
@@ -363,7 +393,7 @@ void TaskController::update(
         }
 
         // ============================================================
-        // 3. REAR_STRIDE_PREPARE: Anchor RR support leg (q=0), shift CoM right (roll -> -3.5°)
+        // 3. REAR_STRIDE_PREPARE: Anchor RR support leg (q=0), shift CoM right (roll -> -4.0°)
         // ============================================================
         case ClimbState::REAR_STRIDE_PREPARE: {
             double current_front_q = front_target_angles_(0);
@@ -377,19 +407,19 @@ void TaskController::update(
             ecc_overrides_(RL) = -0.35;
             override_mask_.fill(true);
 
-            // Pre-shift CoM to the right toward RR (roll -> -3.5 deg = -0.061 rad)
-            target_roll_bias_ = -0.061;
+            // Pre-shift CoM to the right toward RR (roll -> -4.0 deg = -0.070 rad)
+            target_roll_bias_ = -0.070;
 
             // Traction drive: slow forward traction
             wheel_override_mask_.fill(true);
-            wheel_speed_overrides_(FL) = 0.20 / params_.wheel_radius;
-            wheel_speed_overrides_(FR) = 0.20 / params_.wheel_radius;
-            wheel_speed_overrides_(RL) = 0.10 / params_.wheel_radius;
-            wheel_speed_overrides_(RR) = 0.10 / params_.wheel_radius;
-            forward_vel_override_ = 0.15;
+            wheel_speed_overrides_(FL) = 0.15 / params_.wheel_radius;
+            wheel_speed_overrides_(FR) = 0.15 / params_.wheel_radius;
+            wheel_speed_overrides_(RL) = 0.08 / params_.wheel_radius;
+            wheel_speed_overrides_(RR) = 0.08 / params_.wheel_radius;
+            forward_vel_override_ = 0.10;
 
-            // Stabilization wait: 0.20s
-            if (state_timer_ >= 0.20) {
+            // Stabilization wait: 0.35s for roll and CoM transfer to settle firmly
+            if (state_timer_ >= 0.35) {
                 travel_distance_ = 0.0;
                 transitionTo(ClimbState::REAR_SWING_LEFT);
             }
@@ -397,7 +427,7 @@ void TaskController::update(
         }
 
         // ============================================================
-        // 4. REAR_SWING_LEFT: RL swing leg sweeps along cycloid arc over step lip onto plateau
+        // 4. REAR_SWING_LEFT: RL swing leg sweeps quasi-statically (T = 1.25s) over step lip onto plateau
         // ============================================================
         case ClimbState::REAR_SWING_LEFT: {
             double current_front_q = front_target_angles_(0);
@@ -405,25 +435,25 @@ void TaskController::update(
             ecc_overrides_(FR) = current_front_q;
             ecc_overrides_(RR) = 0.0; // RR maintains rigid vertical support
 
-            // RL executes minimum-jerk cycloid swing trajectory (T = 0.45s)
-            // Sweeps: -0.35 rad -> -pi -> +pi -> +1.15 rad
-            double s = std::clamp(state_timer_ / 0.45, 0.0, 1.0);
+            // RL executes quasi-static cycloid swing trajectory (T = 1.25s)
+            // Sweeps smoothly: -0.35 rad -> -pi -> +pi -> +1.15 rad
+            double s = std::clamp(state_timer_ / 1.25, 0.0, 1.0);
             ecc_overrides_(RL) = computeRearSwingTrajectory(s, -0.35, 1.15);
             override_mask_.fill(true);
 
-            target_roll_bias_ = -0.061;
+            target_roll_bias_ = -0.070;
 
-            // Drive: FL & FR pull forward strongly with traction
+            // Drive: FL & FR pull forward gently, RR supports
             wheel_override_mask_.fill(true);
-            wheel_speed_overrides_(FL) = 0.25 / params_.wheel_radius;
-            wheel_speed_overrides_(FR) = 0.25 / params_.wheel_radius;
-            wheel_speed_overrides_(RR) = 0.10 / params_.wheel_radius;
-            wheel_speed_overrides_(RL) = 0.25 / params_.wheel_radius;
-            forward_vel_override_ = 0.20;
+            wheel_speed_overrides_(FL) = 0.20 / params_.wheel_radius;
+            wheel_speed_overrides_(FR) = 0.20 / params_.wheel_radius;
+            wheel_speed_overrides_(RR) = 0.05 / params_.wheel_radius;
+            wheel_speed_overrides_(RL) = 0.20 / params_.wheel_radius;
+            forward_vel_override_ = 0.15;
 
-            // Touchdown detection: once swing is descending (s >= 0.70), check for load acceptance
-            bool touchdown = (s >= 0.70 && contact_detector.isLegTouchdown(RL));
-            if (touchdown || state_timer_ >= 0.55) {
+            // Touchdown detection: once swing is descending (s >= 0.85), check for load acceptance
+            bool touchdown = (s >= 0.85 && contact_detector.isLegTouchdown(RL));
+            if (touchdown || state_timer_ >= 1.40) {
                 travel_distance_ = 0.0;
                 transitionTo(ClimbState::REAR_LOAD_LEFT);
             }
@@ -441,17 +471,18 @@ void TaskController::update(
             ecc_overrides_(RR) = 0.0;  // RR holds vertical ground support
             override_mask_.fill(true);
 
-            target_roll_bias_ = -0.061;
+            target_roll_bias_ = -0.070;
 
             // Drive: RL wheel matches front wheels, pushing forward!
             wheel_override_mask_.fill(true);
-            wheel_speed_overrides_(FL) = 0.25 / params_.wheel_radius;
-            wheel_speed_overrides_(FR) = 0.25 / params_.wheel_radius;
-            wheel_speed_overrides_(RL) = 0.25 / params_.wheel_radius;
-            wheel_speed_overrides_(RR) = 0.10 / params_.wheel_radius;
-            forward_vel_override_ = 0.20;
+            wheel_speed_overrides_(FL) = 0.20 / params_.wheel_radius;
+            wheel_speed_overrides_(FR) = 0.20 / params_.wheel_radius;
+            wheel_speed_overrides_(RL) = 0.20 / params_.wheel_radius;
+            wheel_speed_overrides_(RR) = 0.05 / params_.wheel_radius;
+            forward_vel_override_ = 0.15;
 
-            if (state_timer_ >= 0.18) {
+            // Settle for 0.20s to ensure firm load acceptance and static stability before weight shift
+            if (state_timer_ >= 0.20) {
                 travel_distance_ = 0.0;
                 transitionTo(ClimbState::REAR_SHIFT_LEFT);
             }
@@ -459,7 +490,7 @@ void TaskController::update(
         }
 
         // ============================================================
-        // 6. REAR_SHIFT_LEFT: Shift CoM left (roll -> +3.5°) so △(FL,FR,RL) takes full weight
+        // 6. REAR_SHIFT_LEFT: Shift CoM left (roll -> +4.0°) so △(FL,FR,RL) takes full weight
         // ============================================================
         case ClimbState::REAR_SHIFT_LEFT: {
             double current_front_q = front_target_angles_(0);
@@ -469,18 +500,18 @@ void TaskController::update(
             ecc_overrides_(RR) = 0.0;
             override_mask_.fill(true);
 
-            // Smooth roll transition from -0.061 to +0.061 rad (+3.5 deg) in 0.25s
-            double progress = std::clamp(state_timer_ / 0.25, 0.0, 1.0);
-            target_roll_bias_ = -0.061 + progress * (0.061 - (-0.061));
+            // Smooth roll transition from -0.070 to +0.070 rad (+4.0 deg) in 0.35s
+            double progress = std::clamp(state_timer_ / 0.35, 0.0, 1.0);
+            target_roll_bias_ = -0.070 + progress * (0.070 - (-0.070));
 
             wheel_override_mask_.fill(true);
-            wheel_speed_overrides_(FL) = 0.25 / params_.wheel_radius;
-            wheel_speed_overrides_(FR) = 0.25 / params_.wheel_radius;
-            wheel_speed_overrides_(RL) = 0.25 / params_.wheel_radius;
+            wheel_speed_overrides_(FL) = 0.20 / params_.wheel_radius;
+            wheel_speed_overrides_(FR) = 0.20 / params_.wheel_radius;
+            wheel_speed_overrides_(RL) = 0.20 / params_.wheel_radius;
             wheel_speed_overrides_(RR) = 0.05 / params_.wheel_radius;
-            forward_vel_override_ = 0.20;
+            forward_vel_override_ = 0.15;
 
-            if (state_timer_ >= 0.25) {
+            if (state_timer_ >= 0.35) {
                 travel_distance_ = 0.0;
                 transitionTo(ClimbState::REAR_SWING_RIGHT);
             }
@@ -488,7 +519,7 @@ void TaskController::update(
         }
 
         // ============================================================
-        // 7. REAR_SWING_RIGHT: RR swing leg sweeps along cycloid arc onto plateau
+        // 7. REAR_SWING_RIGHT: RR swing leg sweeps quasi-statically (T = 1.25s) onto plateau
         // ============================================================
         case ClimbState::REAR_SWING_RIGHT: {
             double current_front_q = front_target_angles_(0);
@@ -496,19 +527,19 @@ void TaskController::update(
             ecc_overrides_(FR) = current_front_q;
             ecc_overrides_(RL) = 1.15; // RL on plateau supports body
 
-            // RR executes cycloid swing trajectory (T = 0.45s) from 0.0 -> -pi -> +pi -> 1.15 rad
-            double s = std::clamp(state_timer_ / 0.45, 0.0, 1.0);
+            // RR executes quasi-static cycloid swing trajectory (T = 1.25s) from 0.0 -> -pi -> +pi -> 1.15 rad
+            double s = std::clamp(state_timer_ / 1.25, 0.0, 1.0);
             ecc_overrides_(RR) = computeRearSwingTrajectory(s, 0.0, 1.15);
             override_mask_.fill(true);
 
-            target_roll_bias_ = +0.061;
+            target_roll_bias_ = +0.070;
 
             wheel_override_mask_.fill(true);
-            wheel_speed_overrides_.setConstant(0.25 / params_.wheel_radius);
-            forward_vel_override_ = 0.20;
+            wheel_speed_overrides_.setConstant(0.20 / params_.wheel_radius);
+            forward_vel_override_ = 0.15;
 
-            bool touchdown = (s >= 0.70 && contact_detector.isLegTouchdown(RR));
-            if (touchdown || state_timer_ >= 0.55) {
+            bool touchdown = (s >= 0.85 && contact_detector.isLegTouchdown(RR));
+            if (touchdown || state_timer_ >= 1.40) {
                 travel_distance_ = 0.0;
                 transitionTo(ClimbState::REAR_LOAD_RIGHT);
             }
@@ -526,15 +557,15 @@ void TaskController::update(
             ecc_overrides_(RR) = 1.15;
             override_mask_.fill(true);
 
-            // Roll bias fades to zero
-            double progress = std::clamp(state_timer_ / 0.15, 0.0, 1.0);
-            target_roll_bias_ = (1.0 - progress) * 0.061;
+            // Roll bias fades smoothly to zero over 0.25s
+            double progress = std::clamp(state_timer_ / 0.25, 0.0, 1.0);
+            target_roll_bias_ = (1.0 - progress) * 0.070;
 
             wheel_override_mask_.fill(true);
-            wheel_speed_overrides_.setConstant(0.25 / params_.wheel_radius);
-            forward_vel_override_ = 0.20;
+            wheel_speed_overrides_.setConstant(0.20 / params_.wheel_radius);
+            forward_vel_override_ = 0.15;
 
-            if (state_timer_ >= 0.15) {
+            if (state_timer_ >= 0.25) {
                 target_roll_bias_ = 0.0;
                 travel_distance_ = 0.0;
                 transitionTo(ClimbState::REAR_SETTLED);
