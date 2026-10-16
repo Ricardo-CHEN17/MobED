@@ -1,1 +1,0 @@
-/workspace/mobed_ws/build/robot_interfaces/rosidl_generator_c/robot_interfaces/msg/detail/mob_ed_command__struct.h

@@ -1,1 +1,0 @@
-/workspace/mobed_ws/build/robot_interfaces/rosidl_generator_rs/robot_interfaces/rust/src/msg.rs

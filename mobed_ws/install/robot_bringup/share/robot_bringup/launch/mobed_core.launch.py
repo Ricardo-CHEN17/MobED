@@ -1,1 +1,0 @@
-/workspace/mobed_ws/src/robot_bringup/launch/mobed_core.launch.py

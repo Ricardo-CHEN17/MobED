@@ -91,3 +91,11 @@ mobed_ws/log/
 scratch/
 *_rendered.png
 track_cam_*.png
+
+# ==========================================
+# Native Build, Libraries & Local Symlinks
+# ==========================================
+build_native/
+*.dylib
+install/
+local_mtgvakn0_9w389c_mjcf_stl

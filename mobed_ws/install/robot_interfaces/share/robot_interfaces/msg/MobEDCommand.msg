@@ -1,1 +1,0 @@
-/workspace/mobed_ws/src/robot_interfaces/msg/MobEDCommand.msg

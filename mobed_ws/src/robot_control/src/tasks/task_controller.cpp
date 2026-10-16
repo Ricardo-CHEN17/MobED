@@ -377,6 +377,11 @@ void TaskController::update(
                 cooldown_timer_ = params_.cooldown_duration;
                 transitionTo(ClimbState::IDLE);
             }
+            // Auto-recovery: If falsely triggered on flat ground (delta_height < 35mm) and paused > 1.0s, return to IDLE
+            else if (geometry.delta_height < 0.035 && state_timer_ > 1.0) {
+                cooldown_timer_ = params_.cooldown_duration;
+                transitionTo(ClimbState::IDLE);
+            }
             break;
         }
 

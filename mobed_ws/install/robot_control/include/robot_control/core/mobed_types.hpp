@@ -1,1 +1,0 @@
-/workspace/mobed_ws/src/robot_control/include/robot_control/core/mobed_types.hpp

@@ -1,1 +1,0 @@
-/workspace/mobed_ws/build/robot_interfaces/rosidl_typesupport_introspection_cpp/robot_interfaces/msg/detail/mob_ed_command__rosidl_typesupport_introspection_cpp.hpp

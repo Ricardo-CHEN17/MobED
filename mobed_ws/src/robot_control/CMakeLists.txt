@@ -91,6 +91,17 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 endif()
 
+# Core Facade Library
+add_library(mobed_core SHARED
+  src/core/mobed_controller_core.cpp
+)
+target_include_directories(mobed_core PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+target_include_directories(mobed_core SYSTEM PUBLIC ${EIGEN3_INCLUDE_DIRS})
+target_link_libraries(mobed_core PUBLIC mobed_controllers mobed_estimation mobed_dynamics mobed_tasks)
+
 # INSTALL TARGETS (FIXED)
 install(TARGETS
   mobed_kinematics
@@ -98,6 +109,7 @@ install(TARGETS
   mobed_dynamics
   mobed_tasks
   mobed_controllers
+  mobed_core
   mobed_control_node
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
@@ -110,7 +122,7 @@ install(DIRECTORY include/
 )
 
 ament_export_include_directories(include)
-ament_export_libraries(mobed_kinematics mobed_estimation mobed_dynamics mobed_tasks mobed_controllers)
+ament_export_libraries(mobed_kinematics mobed_estimation mobed_dynamics mobed_tasks mobed_controllers mobed_core)
 ament_export_dependencies(Eigen3 rclcpp sensor_msgs std_msgs robot_interfaces)
 
 ament_package()
